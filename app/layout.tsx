@@ -9,8 +9,8 @@ const inter = Inter({ subsets: ["latin"] })
 
 // # Metadata for siden (titel og beskrivelse)
 export const metadata = {
-  title: "Min Boilerplate",
-  description: "En start-skabelon til mine Next.js projekter",
+  title: "Coach Platform",
+  description: "Trænerplatform til håndboldholdadministration og træningsplanlægning",
 }
 
 // # Root layout component, der indkapsler hele applikationen

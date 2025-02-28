@@ -3,7 +3,7 @@ import Link from "next/link"
 import { ModeToggle } from "@/components/ui/mode-toggle" 
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
-  // # Dette er hovedlayoutet for applikationen
+  // # Dette er hovedlayoutet for trænerplatformen
   // # Det inkluderer header, main-indhold og footer
   // # children er det indhold, der skal vises i main-delen
   return (
@@ -14,14 +14,14 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
           {/* # Navigation med links */}
           <nav className="flex items-center gap-8">
             <Link href="/" className="flex items-center space-x-2">
-              <span className="text-lg font-bold">Min Boilerplate</span>
+              <span className="text-lg font-bold">Coach Platform</span>
             </Link>
             <div className="flex gap-6">
-              <Link href="/dashboard" className="text-sm font-medium hover:text-primary transition-colors">
-                Dashboard
+              <Link href="/hold" className="text-sm font-medium hover:text-primary transition-colors">
+                Hold
               </Link>
-              <Link href="/about" className="text-sm font-medium hover:text-primary transition-colors">
-                Om
+              <Link href="/traener" className="text-sm font-medium hover:text-primary transition-colors">
+                Træner
               </Link>
             </div>
           </nav>
@@ -41,7 +41,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       <footer className="border-t py-6">
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 flex h-10 items-center">
           <p className="text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} Min Boilerplate
+            &copy; {new Date().getFullYear()} Coach Platform
           </p>
         </div>
       </footer>

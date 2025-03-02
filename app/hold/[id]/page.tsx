@@ -5,6 +5,10 @@ import { OFFENSIVE_POSITIONER, DEFENSIVE_POSITIONER, OffensivPosition, DefensivP
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import OpretSpillerDialog from "@/app/hold/[id]/opret-spiller-dialog";
+import RedigerHoldDialog from "@/app/hold/rediger-hold-dialog";
+import SletHoldDialog from "@/app/hold/slet-hold-dialog";
+import RedigerSpillerDialog from "@/app/hold/[id]/rediger-spiller-dialog";
+import SletSpillerDialog from "@/app/hold/[id]/slet-spiller-dialog";
 
 // # Props til siden
 interface HoldPageProps {
@@ -61,8 +65,14 @@ export default async function HoldDetailPage({ params }: HoldPageProps) {
           </p>
         </div>
         
-        {/* # Knap til at tilføje spillere */}
-        <OpretSpillerDialog holdId={holdId} />
+        <div className="flex gap-2">
+          {/* # Knapper til at administrere holdet */}
+          <RedigerHoldDialog holdId={holdId} holdNavn={hold.navn} />
+          <SletHoldDialog holdId={holdId} holdNavn={hold.navn} />
+          
+          {/* # Knap til at tilføje spillere */}
+          <OpretSpillerDialog holdId={holdId} />
+        </div>
       </div>
       
       {/* # Viser en besked når der ikke er nogen spillere endnu */}
@@ -101,19 +111,25 @@ export default async function HoldDetailPage({ params }: HoldPageProps) {
             {spillere.map((spiller) => (
               <Card key={spiller.id} className="hover:shadow-md transition-all">
                 <CardHeader>
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-start">
                     <div>
                       <CardTitle>{spiller.navn}</CardTitle>
                       <CardDescription>
                         {spiller.nummer ? `#${spiller.nummer}` : "Intet nummer"}
                       </CardDescription>
                     </div>
-                    {/* Viser et målvogter-badge hvis spilleren er MV */}
-                    {spiller.erMV && (
-                      <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full font-medium">
-                        Målvogter
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {/* # Knapper til at administrere spilleren */}
+                      <RedigerSpillerDialog spillerId={spiller.id} buttonText="" variant="ghost" />
+                      <SletSpillerDialog spillerId={spiller.id} spillerNavn={spiller.navn} buttonText="" variant="ghost" />
+                      
+                      {/* Viser et målvogter-badge hvis spilleren er MV */}
+                      {spiller.erMV && (
+                        <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full font-medium">
+                          Målvogter
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>

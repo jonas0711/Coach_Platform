@@ -252,4 +252,206 @@ export async function hentSpillereTilHold(holdId: number) {
     console.error(`Fejl ved hentning af spillere for hold ${holdId}:`, error);
     throw new Error(`Kunne ikke hente spillere: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
+}
+
+// # Hent specifik spiller med ID
+export async function hentSpiller(spillerId: number) {
+  try {
+    // # Hent spiller med specifikt ID
+    console.log(`Henter spiller med ID: ${spillerId}`);
+    const spiller = await db.select().from(spillere).where(eq(spillere.id, spillerId));
+    
+    // # Return null hvis spilleren ikke findes
+    if (spiller.length === 0) {
+      return null;
+    }
+    
+    const spillerData = spiller[0];
+    
+    // # Hvis spilleren er målvogter, returner den uden positioner
+    if (spillerData.erMV) {
+      return {
+        ...spillerData,
+        offensivePositioner: [],
+        defensivePositioner: []
+      };
+    }
+    
+    // # Hent offensive positioner
+    const offensivePosListe = await db
+      .select()
+      .from(offensivePositioner)
+      .where(eq(offensivePositioner.spillerId, spillerId));
+      
+    // # Hent defensive positioner
+    const defensivePosListe = await db
+      .select()
+      .from(defensivePositioner)
+      .where(eq(defensivePositioner.spillerId, spillerId));
+      
+    // # Returner spiller med positioner
+    return {
+      ...spillerData,
+      offensivePositioner: offensivePosListe,
+      defensivePositioner: defensivePosListe,
+    };
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved hentning af spiller med ID ${spillerId}:`, error);
+    throw new Error(`Kunne ikke hente spiller: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Opdater eksisterende hold
+export async function opdaterHold(id: number, navn: string) {
+  // # Validér at navnet ikke er tomt
+  if (!navn || navn.trim() === "") {
+    throw new Error("Holdnavn må ikke være tomt");
+  }
+
+  try {
+    // # Opdater hold i databasen
+    console.log(`Opdaterer hold med ID ${id} til nyt navn: ${navn}`);
+    await db.update(hold).set({ navn }).where(eq(hold.id, id));
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath("/hold");
+    revalidatePath(`/hold/${id}`);
+    
+    return true;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved opdatering af hold med ID ${id}:`, error);
+    throw new Error(`Kunne ikke opdatere hold: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Slet hold
+export async function sletHold(id: number) {
+  try {
+    // # Slet hold fra databasen - cascade vil automatisk slette relaterede spillere
+    console.log(`Sletter hold med ID: ${id}`);
+    await db.delete(hold).where(eq(hold.id, id));
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath("/hold");
+    
+    return true;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved sletning af hold med ID ${id}:`, error);
+    throw new Error(`Kunne ikke slette hold: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Opdater eksisterende spiller
+export async function opdaterSpiller(spillerId: number, spillerData: SpillerData) {
+  // # Validér at navn ikke er tomt
+  if (!spillerData.navn || spillerData.navn.trim() === "") {
+    throw new Error("Spillernavn må ikke være tomt");
+  }
+
+  // # Hent spilleren først for at få holdId til sti-revalidering
+  const eksisterendeSpiller = await db.select().from(spillere).where(eq(spillere.id, spillerId));
+  if (eksisterendeSpiller.length === 0) {
+    throw new Error("Spilleren findes ikke");
+  }
+  const holdId = eksisterendeSpiller[0].holdId;
+
+  // # Validér at målvogtere ikke har positioner
+  if (spillerData.erMV) {
+    // # Hvis spilleren er målvogter, skal de ikke have positioner
+    spillerData.offensivePositioner = [];
+    spillerData.defensivePositioner = [];
+  } else {
+    // # Validér offensive positioner (skal have præcis én primær)
+    if (!spillerData.erMV) {
+      const primærOffensiv = spillerData.offensivePositioner.filter(p => p.erPrimaer);
+      if (primærOffensiv.length !== 1) {
+        throw new Error("Spilleren skal have præcis én primær offensiv position");
+      }
+    }
+
+    // # Validér defensive positioner (skal have 1-2 primære)
+    if (!spillerData.erMV) {
+      const primærDefensiv = spillerData.defensivePositioner.filter(p => p.erPrimaer);
+      if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
+        throw new Error("Spilleren skal have 1-2 primære defensive positioner");
+      }
+    }
+  }
+
+  try {
+    console.log(`Opdaterer spiller med ID: ${spillerId}`);
+    
+    // # Opdater spillerens basale data
+    await db.update(spillere).set({
+      navn: spillerData.navn,
+      nummer: spillerData.nummer,
+      erMV: spillerData.erMV,
+    }).where(eq(spillere.id, spillerId));
+    
+    // # Håndter positioner
+    if (spillerData.erMV) {
+      // # Slet alle positioner hvis spilleren er målvogter
+      await db.delete(offensivePositioner).where(eq(offensivePositioner.spillerId, spillerId));
+      await db.delete(defensivePositioner).where(eq(defensivePositioner.spillerId, spillerId));
+    } else {
+      // # Slet alle nuværende positioner
+      await db.delete(offensivePositioner).where(eq(offensivePositioner.spillerId, spillerId));
+      await db.delete(defensivePositioner).where(eq(defensivePositioner.spillerId, spillerId));
+      
+      // # Opret nye offensive positioner
+      for (const pos of spillerData.offensivePositioner) {
+        await db.insert(offensivePositioner).values({
+          spillerId,
+          position: pos.position,
+          erPrimaer: pos.erPrimaer,
+        });
+      }
+
+      // # Opret nye defensive positioner
+      for (const pos of spillerData.defensivePositioner) {
+        await db.insert(defensivePositioner).values({
+          spillerId,
+          position: pos.position,
+          erPrimaer: pos.erPrimaer,
+        });
+      }
+    }
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath(`/hold/${holdId}`);
+    
+    return true;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved opdatering af spiller med ID ${spillerId}:`, error);
+    throw new Error(`Kunne ikke opdatere spiller: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Slet spiller
+export async function sletSpiller(spillerId: number) {
+  try {
+    // # Hent spilleren først for at få holdId til sti-revalidering
+    const spiller = await db.select().from(spillere).where(eq(spillere.id, spillerId));
+    if (spiller.length === 0) {
+      throw new Error("Spilleren findes ikke");
+    }
+    const holdId = spiller[0].holdId;
+    
+    // # Slet spilleren fra databasen - cascade vil håndtere relationer
+    console.log(`Sletter spiller med ID: ${spillerId}`);
+    await db.delete(spillere).where(eq(spillere.id, spillerId));
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath(`/hold/${holdId}`);
+    
+    return true;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved sletning af spiller med ID ${spillerId}:`, error);
+    throw new Error(`Kunne ikke slette spiller: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
 } 

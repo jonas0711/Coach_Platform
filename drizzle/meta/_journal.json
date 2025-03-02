@@ -8,6 +8,13 @@
       "when": 1740758161067,
       "tag": "0000_fuzzy_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1740917924100,
+      "tag": "0001_cute_luckman",
+      "breakpoints": true
     }
   ]
 }

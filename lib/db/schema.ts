@@ -25,6 +25,21 @@ export const spillere = sqliteTable("spillere", {
     .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
 });
 
+// # Tabel for træninger
+// # Indeholder oplysninger om en træningssession og dens tilknytning til et hold
+export const traeninger = sqliteTable("traeninger", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  holdId: integer("hold_id").notNull().references(() => hold.id, { onDelete: "cascade" }), // # Relation til et hold
+  navn: text("navn").notNull(), // # Træningens navn er påkrævet
+  beskrivelse: text("beskrivelse"), // # Valgfri beskrivelse af træningen
+  dato: integer("dato", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Træningsdato, standardværdi er nu
+  oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
+});
+
 // # Offensive positioner for en spiller
 // # En spiller kan have flere offensive positioner, hvoraf én kan være primær
 export const offensivePositioner = sqliteTable(

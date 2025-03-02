@@ -20,6 +20,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               <Link href="/hold" className="text-sm font-medium hover:text-primary transition-colors">
                 Hold
               </Link>
+              <Link href="/traening" className="text-sm font-medium hover:text-primary transition-colors">
+                Træning
+              </Link>
               <Link href="/traener" className="text-sm font-medium hover:text-primary transition-colors">
                 Træner
               </Link>

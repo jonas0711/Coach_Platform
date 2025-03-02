@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import Link from "next/link"
 
 export default function TraenerPage() {
   // # Dette er siden for træner-sektionen
@@ -15,25 +16,27 @@ export default function TraenerPage() {
         
         {/* # Knapper til hovedfunktioner */}
         <div className="flex flex-wrap gap-4 mb-8">
-          <Button>
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              className="mr-2"
-            >
-              <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
-              <line x1="16" x2="16" y1="2" y2="6" />
-              <line x1="8" x2="8" y1="2" y2="6" />
-              <line x1="3" x2="21" y1="10" y2="10" />
-            </svg>
-            Planlæg ny træning
+          <Button asChild>
+            <Link href="/traening">
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className="mr-2"
+              >
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+              Planlæg ny træning
+            </Link>
           </Button>
           <Button variant="outline">
             <svg 
@@ -70,7 +73,9 @@ export default function TraenerPage() {
               <p className="text-sm">Lav strukturerede træningsplaner med øvelser, tidsplaner og fokusområder.</p>
             </CardContent>
             <CardFooter>
-              <Button variant="outline" className="w-full">Planlæg træning</Button>
+              <Button variant="outline" className="w-full" asChild>
+                <Link href="/traening">Planlæg træning</Link>
+              </Button>
             </CardFooter>
           </Card>
           
@@ -129,7 +134,9 @@ export default function TraenerPage() {
           <p className="text-muted-foreground mb-4">
             Du har ikke planlagt nogen kommende træninger. Planlæg din første træning for at komme i gang.
           </p>
-          <Button>Planlæg første træning</Button>
+          <Button asChild>
+            <Link href="/traening">Planlæg første træning</Link>
+          </Button>
         </div>
       </section>
     </div>

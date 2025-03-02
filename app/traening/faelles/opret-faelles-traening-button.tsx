@@ -1,44 +1,44 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogFooter, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogTrigger 
-} from "@/components/ui/dialog";
+import { Plus, Loader2, CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PlusIcon, Loader2 } from "lucide-react";
-import { opretTraening } from "@/lib/db/actions";
-import { 
-  Form, 
-  FormControl, 
-  FormField, 
-  FormItem, 
-  FormLabel, 
-  FormMessage 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { format } from "date-fns";
 import { da } from "date-fns/locale";
-import { toast } from "sonner";
 import { 
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
-import { CalendarIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import { opretFaellesTraening } from "@/lib/db/actions";
 
-// # Valideringsschema for træningsformular
+// # Valideringsschema for formularen
 const formSchema = z.object({
   navn: z.string().min(1, {
     message: "Træningsnavn er påkrævet",
@@ -51,13 +51,19 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
-export function OpretTraeningDialog({ holdId }: { holdId: number }) {
-  // # State til at styre om dialogen er åben eller lukket
-  const [open, setOpen] = useState(false);
-  // # State til at håndtere indlæsningstilstand
-  const [isSubmitting, setIsSubmitting] = useState(false);
+// # Type defintion for props
+type OpretFaellesTraeningButtonProps = React.ComponentPropsWithoutRef<typeof Button>;
 
-  // # Initialiser formularen med react-hook-form og zod-validering
+// # OpretFaellesTraeningButton komponent
+export function OpretFaellesTraeningButton({ variant = "outline", ...props }: OpretFaellesTraeningButtonProps) {
+  // # State til at styre dialog åben/lukket
+  const [open, setOpen] = useState(false);
+  // # State til at styre loading status
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // # Router til navigation
+  const router = useRouter();
+
+  // # Opsætning af formular
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -67,59 +73,55 @@ export function OpretTraeningDialog({ holdId }: { holdId: number }) {
     },
   });
 
-  // # Håndterer indsendelse af formularen
+  // # Håndtering af formular-indsendelse
   async function onSubmit(values: FormValues) {
-    // # Sæt indlæsningstilstand til true
     setIsSubmitting(true);
     
     try {
-      // # Forsøg at oprette træningen i databasen
-      console.log("Opretter træning:", values);
-      await opretTraening({
+      // # Opret træning i databasen
+      const traeningId = await opretFaellesTraening({
         navn: values.navn,
         beskrivelse: values.beskrivelse,
         dato: values.dato,
-        holdIds: [holdId]
       });
       
-      // # Vis en succesmeddelelse
-      toast.success("Træningen blev oprettet");
+      // # Vis succesmeddelelse
+      toast.success("Fælles træning blev oprettet");
       
-      // # Nulstil formen og luk dialogen
-      form.reset();
+      // # Luk dialogen
       setOpen(false);
+      
+      // # Nulstil formularen
+      form.reset();
+      
+      // # Navigér til den nye træningsside
+      router.push(`/traening/faelles/${traeningId}`);
     } catch (error) {
-      // # Håndtér fejl og vis en fejlmeddelelse
+      // # Håndter fejl
       console.error("Fejl ved oprettelse af træning:", error);
       toast.error(`Der opstod en fejl: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
     } finally {
-      // # Afslut indlæsningstilstand
       setIsSubmitting(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      {/* # Knap til at åbne dialogen */}
       <DialogTrigger asChild>
-        <Button>
-          <PlusIcon className="mr-2 h-4 w-4" />
-          Opret træning
+        <Button variant={variant} {...props}>
+          <Plus className="mr-2 h-4 w-4" />
+          Opret fælles træning
         </Button>
       </DialogTrigger>
-      
-      {/* # Dialog-indhold */}
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Opret ny træning</DialogTitle>
+          <DialogTitle>Opret fælles træning</DialogTitle>
           <DialogDescription>
-            Opret en ny træningssession for holdet. Udfyld navn, beskrivelse og dato.
+            Opret en ny fælles træning. Du kan senere tilføje hold og spillere.
           </DialogDescription>
         </DialogHeader>
-        
-        {/* # Træningsformular */}
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             {/* # Træningsnavn */}
             <FormField
               control={form.control}
@@ -128,7 +130,7 @@ export function OpretTraeningDialog({ holdId }: { holdId: number }) {
                 <FormItem>
                   <FormLabel>Træningsnavn</FormLabel>
                   <FormControl>
-                    <Input placeholder="Angiv navn på træningen" {...field} />
+                    <Input {...field} placeholder="F.eks. 'Fællestræning U13-U15'" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -144,10 +146,9 @@ export function OpretTraeningDialog({ holdId }: { holdId: number }) {
                   <FormLabel>Beskrivelse (valgfri)</FormLabel>
                   <FormControl>
                     <Textarea 
-                      placeholder="Beskriv træningens formål eller indhold" 
-                      className="min-h-24" 
                       {...field} 
-                      value={field.value || ""} 
+                      placeholder="Skriv evt. en kort beskrivelse af træningen"
+                      value={field.value || ""}
                     />
                   </FormControl>
                   <FormMessage />
@@ -195,9 +196,8 @@ export function OpretTraeningDialog({ holdId }: { holdId: number }) {
               )}
             />
             
-            {/* # Knapper til at afbryde eller oprette */}
-            <DialogFooter>
-              <Button variant="outline" type="button" onClick={() => setOpen(false)}>
+            <DialogFooter className="mt-6">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Annuller
               </Button>
               <Button type="submit" disabled={isSubmitting}>

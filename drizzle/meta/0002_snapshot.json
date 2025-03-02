@@ -1,0 +1,438 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "f6e5269b-640d-481e-bf2e-b5effaf91ced",
+  "prevId": "e2c9fe14-e028-4727-afc1-d0928b6a946d",
+  "tables": {
+    "defensive_positioner": {
+      "name": "defensive_positioner",
+      "columns": {
+        "spiller_id": {
+          "name": "spiller_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "er_primaer": {
+          "name": "er_primaer",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "defensive_positioner_spiller_id_spillere_id_fk": {
+          "name": "defensive_positioner_spiller_id_spillere_id_fk",
+          "tableFrom": "defensive_positioner",
+          "tableTo": "spillere",
+          "columnsFrom": [
+            "spiller_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "defensive_positioner_spiller_id_position_pk": {
+          "columns": [
+            "spiller_id",
+            "position"
+          ],
+          "name": "defensive_positioner_spiller_id_position_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "hold": {
+      "name": "hold",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "navn": {
+          "name": "navn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "oprettet_dato": {
+          "name": "oprettet_dato",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "offensive_positioner": {
+      "name": "offensive_positioner",
+      "columns": {
+        "spiller_id": {
+          "name": "spiller_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "er_primaer": {
+          "name": "er_primaer",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "offensive_positioner_spiller_id_spillere_id_fk": {
+          "name": "offensive_positioner_spiller_id_spillere_id_fk",
+          "tableFrom": "offensive_positioner",
+          "tableTo": "spillere",
+          "columnsFrom": [
+            "spiller_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "offensive_positioner_spiller_id_position_pk": {
+          "columns": [
+            "spiller_id",
+            "position"
+          ],
+          "name": "offensive_positioner_spiller_id_position_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "spillere": {
+      "name": "spillere",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "hold_id": {
+          "name": "hold_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "navn": {
+          "name": "navn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nummer": {
+          "name": "nummer",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "er_mv": {
+          "name": "er_mv",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "oprettet_dato": {
+          "name": "oprettet_dato",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "spillere_hold_id_hold_id_fk": {
+          "name": "spillere_hold_id_hold_id_fk",
+          "tableFrom": "spillere",
+          "tableTo": "hold",
+          "columnsFrom": [
+            "hold_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "traening_deltager": {
+      "name": "traening_deltager",
+      "columns": {
+        "traening_id": {
+          "name": "traening_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "spiller_id": {
+          "name": "spiller_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tilstede": {
+          "name": "tilstede",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "registreret_dato": {
+          "name": "registreret_dato",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "traening_deltager_traening_id_traeninger_id_fk": {
+          "name": "traening_deltager_traening_id_traeninger_id_fk",
+          "tableFrom": "traening_deltager",
+          "tableTo": "traeninger",
+          "columnsFrom": [
+            "traening_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "traening_deltager_spiller_id_spillere_id_fk": {
+          "name": "traening_deltager_spiller_id_spillere_id_fk",
+          "tableFrom": "traening_deltager",
+          "tableTo": "spillere",
+          "columnsFrom": [
+            "spiller_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "traening_deltager_traening_id_spiller_id_pk": {
+          "columns": [
+            "traening_id",
+            "spiller_id"
+          ],
+          "name": "traening_deltager_traening_id_spiller_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "traening_hold": {
+      "name": "traening_hold",
+      "columns": {
+        "traening_id": {
+          "name": "traening_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hold_id": {
+          "name": "hold_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tilmeldt_dato": {
+          "name": "tilmeldt_dato",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "traening_hold_traening_id_traeninger_id_fk": {
+          "name": "traening_hold_traening_id_traeninger_id_fk",
+          "tableFrom": "traening_hold",
+          "tableTo": "traeninger",
+          "columnsFrom": [
+            "traening_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "traening_hold_hold_id_hold_id_fk": {
+          "name": "traening_hold_hold_id_hold_id_fk",
+          "tableFrom": "traening_hold",
+          "tableTo": "hold",
+          "columnsFrom": [
+            "hold_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "traening_hold_traening_id_hold_id_pk": {
+          "columns": [
+            "traening_id",
+            "hold_id"
+          ],
+          "name": "traening_hold_traening_id_hold_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "traeninger": {
+      "name": "traeninger",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "hold_id": {
+          "name": "hold_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "navn": {
+          "name": "navn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "beskrivelse": {
+          "name": "beskrivelse",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dato": {
+          "name": "dato",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "oprettet_dato": {
+          "name": "oprettet_dato",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "flere_tilmeldte": {
+          "name": "flere_tilmeldte",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "traeninger_hold_id_hold_id_fk": {
+          "name": "traeninger_hold_id_hold_id_fk",
+          "tableFrom": "traeninger",
+          "tableTo": "hold",
+          "columnsFrom": [
+            "hold_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

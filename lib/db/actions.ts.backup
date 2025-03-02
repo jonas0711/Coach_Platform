@@ -31,7 +31,8 @@ export interface TraeningData {
   navn: string;
   beskrivelse?: string;
   dato?: Date;
-  holdIds?: number[]; // # Array af holdIds, hvis træningen har flere tilknyttede hold
+  flereTilmeldte?: boolean;
+  holdIds?: number[]; // nye parameter når man opretter træning med flere hold
 }
 
 // # Opret nyt hold
@@ -466,56 +467,62 @@ export async function sletSpiller(spillerId: number) {
 
 // # Trænings-relaterede database funktioner
 
-// # Opret ny træning (med mulighed for flere hold)
-export async function opretTraening(traeningData: TraeningData) {
+// # Opret ny træning med mulighed for flere hold
+export async function opretTraening(holdId: number | null, traeningData: TraeningData) {
   // # Validér at navn ikke er tomt
   if (!traeningData.navn || traeningData.navn.trim() === "") {
     throw new Error("Træningsnavn må ikke være tomt");
   }
 
+  // # Validér at der er mindst ét hold
+  if (!holdId && (!traeningData.holdIds || traeningData.holdIds.length === 0)) {
+    throw new Error("Der skal være mindst ét hold tilmeldt til træningen");
+  }
+
   try {
-    // # Standard træningsdato er i dag, hvis ikke angivet
-    const dato = traeningData.dato || new Date();
-    
-    // # Tjek om træningen har flere hold tilknyttet
-    const flereTilmeldte = Array.isArray(traeningData.holdIds) && traeningData.holdIds.length > 0;
-    
-    // # Hvis træningen kun har ét hold og det er angivet, sæt holdId på træningen
-    let holdId = undefined;
-    if (Array.isArray(traeningData.holdIds) && traeningData.holdIds.length === 1) {
-      holdId = traeningData.holdIds[0];
-    }
-    
     // # Indsæt træning i databasen
-    console.log(`Opretter træning med navn: ${traeningData.navn}`);
+    console.log(`Opretter træning '${traeningData.navn}'`);
     
     const result = await db.insert(traeninger).values({
+      holdId: holdId, // Kan være null for træninger med flere hold
       navn: traeningData.navn,
-      beskrivelse: traeningData.beskrivelse,
-      dato,
-      holdId,
-      flereTilmeldte,
+      beskrivelse: traeningData.beskrivelse || null,
+      dato: traeningData.dato || new Date(),
+      flereTilmeldte: traeningData.holdIds && traeningData.holdIds.length > 0 ? true : false,
     }).returning({ id: traeninger.id });
+    
+    // # Log resultatet for debugging
+    console.log("Træning oprettet:", result);
     
     const traeningId = result[0].id;
     
-    // # Hvis der er flere hold, opret relationer
-    if (flereTilmeldte && Array.isArray(traeningData.holdIds)) {
-      console.log(`Tilmelder ${traeningData.holdIds.length} hold til træningen`);
+    // # Hvis der er flere hold, tilføj dem til traening_hold tabellen
+    if (traeningData.holdIds && traeningData.holdIds.length > 0) {
+      console.log(`Tilføjer ${traeningData.holdIds.length} hold til træningen`);
       
-      // # Opret en relation for hvert hold
-      for (const holdId of traeningData.holdIds) {
+      // # Forbind alle de valgte hold til træningen
+      for (const hId of traeningData.holdIds) {
         await db.insert(traeningHold).values({
-          traeningId,
-          holdId,
+          traeningId: traeningId,
+          holdId: hId,
         });
       }
+    } else if (holdId) {
+      // # Hvis vi kun har ét hold, tilføj det til traening_hold tabellen
+      await db.insert(traeningHold).values({
+        traeningId: traeningId,
+        holdId: holdId,
+      });
     }
     
-    // # Revalidér stien så siden opdateres
-    revalidatePath("/traening");
+    // # Revalidér stier så siderne opdateres
+    if (holdId) {
+      revalidatePath(`/traening/${holdId}`);
+      revalidatePath(`/hold/${holdId}`);
+    }
+    revalidatePath('/traening');
     
-    // # Returner det oprettede trænings ID
+    // # Returner det oprettede holds ID
     return traeningId;
   } catch (error) {
     // # Log fejl og videregiv den til kalderen
@@ -524,161 +531,19 @@ export async function opretTraening(traeningData: TraeningData) {
   }
 }
 
-// # Opret fælles træning (med flere hold)
-export async function opretFaellesTraening(traeningData: TraeningData) {
-  // # Sæt flereTilmeldte flag til true
-  return opretTraening({
-    ...traeningData,
-    flereTilmeldte: true
-  });
-}
-
-// # Hent specifik træning med ID
-export async function hentTraening(id: number) {
+// # Hent alle træninger med mulighed for filtrering på hold
+export async function hentAlleTreanninger(holdId?: number) {
   try {
-    // # Hent træning med specifikt ID
-    console.log(`Henter træning med ID: ${id}`);
-    const result = await db.select().from(traeninger).where(eq(traeninger.id, id));
+    let query = db.select().from(traeninger);
     
-    // # Return null hvis træningen ikke findes
-    if (result.length === 0) {
-      return null;
+    if (holdId) {
+      // # Hvis holdId er angivet, filtrer træninger til kun at omfatte dem, der har dette hold
+      query = query.where(
+        eq(traeninger.holdId, holdId)
+      );
     }
     
-    // # Returner det fundne træning
-    return result[0];
-  } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved hentning af træning med ID ${id}:`, error);
-    throw new Error(`Kunne ikke hente træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
-  }
-}
-
-// # Opdater træningsinformation
-export async function opdaterTraening(id: number, data: Partial<Pick<typeof traeninger.$inferSelect, "navn" | "beskrivelse" | "dato">>) {
-  try {
-    // # Opdater træningen i databasen
-    console.log(`Opdaterer træning med ID: ${id}`);
-    await db.update(traeninger)
-      .set(data)
-      .where(eq(traeninger.id, id));
-    
-    // # Revalidér stien så siden opdateres
-    revalidatePath(`/traening/faelles/${id}`);
-    
-    return true;
-  } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved opdatering af træning med ID ${id}:`, error);
-    throw new Error(`Kunne ikke opdatere træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
-  }
-}
-
-// # Slet træning
-export async function sletTraening(id: number) {
-  try {
-    // # Slet træningen fra databasen
-    console.log(`Sletter træning med ID: ${id}`);
-    await db.delete(traeninger).where(eq(traeninger.id, id));
-    
-    // # Revalidér stien så siden opdateres
-    revalidatePath(`/traening/faelles`);
-    
-    return true;
-  } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved sletning af træning med ID ${id}:`, error);
-    throw new Error(`Kunne ikke slette træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
-  }
-}
-
-// # Tilmeld hold til træning
-export async function tilmeldHoldTilTraening(traeningId: number, holdIds: number[]) {
-  try {
-    // # Først fjern alle eksisterende tilmeldinger
-    console.log(`Fjerner eksisterende holdtilmeldinger for træning ID: ${traeningId}`);
-    await db.delete(traeningHold).where(eq(traeningHold.traeningId, traeningId));
-    
-    // # Derefter tilføj de nye tilmeldinger
-    console.log(`Tilmelder ${holdIds.length} hold til træning ID: ${traeningId}`);
-    
-    for (const holdId of holdIds) {
-      await db.insert(traeningHold).values({
-        traeningId,
-        holdId,
-      });
-    }
-    
-    // # Opdater træningen til at have flereTilmeldte flag
-    await db.update(traeninger)
-      .set({ 
-        flereTilmeldte: holdIds.length > 1,
-        holdId: holdIds.length === 1 ? holdIds[0] : null
-      })
-      .where(eq(traeninger.id, traeningId));
-    
-    // # Revalidér stien så siden opdateres
-    revalidatePath(`/traening/faelles/${traeningId}`);
-    
-    return true;
-  } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved tilmelding af hold til træning ID ${traeningId}:`, error);
-    throw new Error(`Kunne ikke tilmelde hold: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
-  }
-}
-
-// # Registrer tilstedeværelse for spillere ved en træning
-export async function registrerTilstedevarelse(traeningId: number, tilstedevaelse: Array<{spillerId: number, tilstede: boolean}>) {
-  try {
-    // # Først fjern alle eksisterende tilstedeværelsesregistreringer
-    console.log(`Fjerner eksisterende tilstedeværelse for træning ID: ${traeningId}`);
-    await db.delete(traeningDeltager).where(eq(traeningDeltager.traeningId, traeningId));
-    
-    // # Derefter tilføj de nye registreringer
-    console.log(`Registrerer tilstedeværelse for ${tilstedevaelse.length} spillere ved træning ID: ${traeningId}`);
-    
-    for (const { spillerId, tilstede } of tilstedevaelse) {
-      await db.insert(traeningDeltager).values({
-        traeningId,
-        spillerId,
-        tilstede,
-      });
-    }
-    
-    // # Revalidér stien så siden opdateres
-    revalidatePath(`/traening/faelles/${traeningId}`);
-    
-    return true;
-  } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved registrering af tilstedeværelse for træning ID ${traeningId}:`, error);
-    throw new Error(`Kunne ikke registrere tilstedeværelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
-  }
-}
-
-// # Hent alle træninger for et specifikt hold
-export async function hentTraeningerTilHold(holdId: number) {
-  try {
-    // # Hent alle træninger til holdet fra databasen, sorteret efter dato (nyeste først)
-    console.log(`Henter træninger for hold ID: ${holdId}`);
-    return await db.select().from(traeninger)
-      .where(eq(traeninger.holdId, holdId))
-      .orderBy(traeninger.dato);
-  } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved hentning af træninger for hold ID ${holdId}:`, error);
-    throw new Error(`Kunne ikke hente træninger: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
-  }
-}
-
-// # Hent alle træninger med flere hold
-export async function hentAlleTræninger() {
-  try {
-    // # Hent alle træninger fra databasen, sorteret efter dato
-    console.log("Henter alle træninger");
-    return await db.select().from(traeninger)
-      .orderBy(traeninger.dato);
+    return await query.orderBy(traeninger.dato);
   } catch (error) {
     // # Log fejl og videregiv den til kalderen
     console.error("Fejl ved hentning af alle træninger:", error);
@@ -715,42 +580,104 @@ export async function hentTilmeldteHold(traeningId: number) {
   }
 }
 
-// # Hent alle spillere fra de deltagende hold i en træning
-export async function hentSpillereTilTraening(traeningId: number) {
+// # Opdater tilmeldte hold for en træning
+export async function opdaterTilmeldteHold(traeningId: number, holdIds: number[]) {
   try {
-    // # Hent først alle hold tilknyttet træningen
-    const tilmeldteHold = await hentTilmeldteHold(traeningId);
+    // # Hent træningen først for at verificere at den eksisterer
+    const traening = await hentTraening(traeningId);
     
-    if (tilmeldteHold.length === 0) {
-      return [];
+    if (!traening) {
+      throw new Error("Træning findes ikke");
     }
     
-    // # Udtræk alle holdIDs
-    const holdIds = tilmeldteHold.map(h => h.id);
+    // # Slet først alle eksisterende tilmeldinger
+    await db.delete(traeningHold).where(eq(traeningHold.traeningId, traeningId));
     
-    // # Hent alle spillere der er tilknyttet disse hold
-    const alleSpillere = await db
-      .select()
-      .from(spillere)
-      .where(inArray(spillere.holdId, holdIds))
-      .orderBy(spillere.navn);
+    // # Validér at der er mindst ét hold
+    if (holdIds.length === 0) {
+      throw new Error("Der skal være mindst ét hold tilmeldt til træningen");
+    }
     
-    // # Berig spillerne med information om deres hold
-    const spillereMedHold = await Promise.all(
-      alleSpillere.map(async (spiller) => {
-        const holdInfo = tilmeldteHold.find(h => h.id === spiller.holdId);
-        return {
-          ...spiller,
-          holdNavn: holdInfo ? holdInfo.navn : "Ukendt hold"
-        };
+    // # Tilføj de nye hold
+    for (const holdId of holdIds) {
+      await db.insert(traeningHold).values({
+        traeningId,
+        holdId,
+      });
+    }
+    
+    // # Opdater træningens flereTilmeldte flag
+    await db.update(traeninger)
+      .set({ 
+        flereTilmeldte: holdIds.length > 1,
+        // Hvis der kun er et hold, sæt det som primært holdId
+        holdId: holdIds.length === 1 ? holdIds[0] : null,
       })
-    );
+      .where(eq(traeninger.id, traeningId));
     
-    return spillereMedHold;
+    // # Revalidér stier
+    revalidatePath(`/traening`);
+    revalidatePath(`/traening/${traeningId}`);
+    
+    return true;
   } catch (error) {
     // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved hentning af spillere til træning ${traeningId}:`, error);
-    throw new Error(`Kunne ikke hente spillere: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+    console.error(`Fejl ved opdatering af tilmeldte hold til træning ${traeningId}:`, error);
+    throw new Error(`Kunne ikke opdatere tilmeldte hold: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Registrér eller opdatér tilstedeværelse for spillere
+export async function registrerTilstedevarelse(traeningId: number, spillerStatus: { spillerId: number, tilstede: boolean }[]) {
+  try {
+    // # Hent træningen først for at verificere at den eksisterer
+    const traening = await hentTraening(traeningId);
+    
+    if (!traening) {
+      throw new Error("Træning findes ikke");
+    }
+    
+    // # Opdater eller indsæt tilstedeværelse for hver spiller
+    for (const { spillerId, tilstede } of spillerStatus) {
+      // # Tjek om der allerede er en registrering for denne spiller i denne træning
+      const eksisterende = await db
+        .select()
+        .from(traeningDeltager)
+        .where(
+          and(
+            eq(traeningDeltager.traeningId, traeningId),
+            eq(traeningDeltager.spillerId, spillerId)
+          )
+        );
+      
+      if (eksisterende.length > 0) {
+        // # Opdater eksisterende registrering
+        await db.update(traeningDeltager)
+          .set({ tilstede })
+          .where(
+            and(
+              eq(traeningDeltager.traeningId, traeningId),
+              eq(traeningDeltager.spillerId, spillerId)
+            )
+          );
+      } else {
+        // # Opret ny registrering
+        await db.insert(traeningDeltager).values({
+          traeningId,
+          spillerId,
+          tilstede,
+        });
+      }
+    }
+    
+    // # Revalidér stier
+    revalidatePath(`/traening/${traening.holdId}/${traeningId}`);
+    
+    return true;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved registrering af tilstedeværelse for træning ${traeningId}:`, error);
+    throw new Error(`Kunne ikke registrere tilstedeværelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
 }
 
@@ -765,6 +692,115 @@ export async function hentTilstedevarelse(traeningId: number) {
   } catch (error) {
     // # Log fejl og videregiv den til kalderen
     console.error(`Fejl ved hentning af tilstedeværelse for træning ${traeningId}:`, error);
-    throw new Error(`Kunde ikke hente tilstedeværelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+    throw new Error(`Kunne ikke hente tilstedeværelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
+}
+
+// # Hent alle træninger for et specifikt hold
+export async function hentTraeningerTilHold(holdId: number) {
+  try {
+    // # Hent alle træninger til holdet fra databasen, sorteret efter dato (nyeste først)
+    console.log(`Henter træninger for hold ID: ${holdId}`);
+    return await db.select().from(traeninger)
+      .where(eq(traeninger.holdId, holdId))
+      .orderBy(traeninger.dato);
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved hentning af træninger for hold ID ${holdId}:`, error);
+    throw new Error(`Kunne ikke hente træninger: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent specifik træning med ID
+export async function hentTraening(traeningId: number) {
+  try {
+    // # Hent træning med specifikt ID
+    console.log(`Henter træning med ID: ${traeningId}`);
+    const result = await db.select().from(traeninger).where(eq(traeninger.id, traeningId));
+    
+    // # Return null hvis træningen ikke findes
+    if (result.length === 0) {
+      return null;
+    }
+    
+    // # Returner den fundne træning
+    return result[0];
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved hentning af træning med ID ${traeningId}:`, error);
+    throw new Error(`Kunne ikke hente træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Opdater eksisterende træning
+export async function opdaterTraening(traeningId: number, traeningData: TraeningData) {
+  // # Validér at navn ikke er tomt
+  if (!traeningData.navn || traeningData.navn.trim() === "") {
+    throw new Error("Træningsnavn må ikke være tomt");
+  }
+
+  try {
+    // # Hent træningen for at verificere at den eksisterer og få holdId
+    const eksisterendeTraening = await hentTraening(traeningId);
+    
+    if (!eksisterendeTraening) {
+      throw new Error("Træning findes ikke");
+    }
+    
+    // # Opdater træningen i databasen
+    console.log(`Opdaterer træning med ID: ${traeningId}`);
+    
+    await db.update(traeninger)
+      .set({ 
+        navn: traeningData.navn,
+        beskrivelse: traeningData.beskrivelse || null,
+        dato: traeningData.dato || eksisterendeTraening.dato,
+      })
+      .where(eq(traeninger.id, traeningId));
+    
+    // # Revalidér stier så siderne opdateres
+    if (eksisterendeTraening.holdId) {
+      revalidatePath(`/traening/${eksisterendeTraening.holdId}`);
+      revalidatePath(`/traening/${eksisterendeTraening.holdId}/${traeningId}`);
+      revalidatePath(`/hold/${eksisterendeTraening.holdId}`);
+    }
+    revalidatePath(`/traening/${traeningId}`);
+    
+    return traeningId;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved opdatering af træning med ID ${traeningId}:`, error);
+    throw new Error(`Kunne ikke opdatere træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Slet træning
+export async function sletTraening(traeningId: number) {
+  try {
+    // # Hent træningen for at verificere at den eksisterer og få holdId
+    const eksisterendeTraening = await hentTraening(traeningId);
+    
+    if (!eksisterendeTraening) {
+      throw new Error("Træning findes ikke");
+    }
+    
+    // # Slet træningen fra databasen
+    console.log(`Sletter træning med ID: ${traeningId}`);
+    
+    await db.delete(traeninger).where(eq(traeninger.id, traeningId));
+    
+    // # Revalidér stier så siderne opdateres
+    if (eksisterendeTraening.holdId) {
+      revalidatePath(`/traening/${eksisterendeTraening.holdId}`);
+      revalidatePath(`/hold/${eksisterendeTraening.holdId}`);
+    }
+    revalidatePath(`/traening`);
+    
+    return eksisterendeTraening.holdId;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved sletning af træning med ID ${traeningId}:`, error);
+    throw new Error(`Kunne ikke slette træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+} 
 } 

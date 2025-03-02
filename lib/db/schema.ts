@@ -29,7 +29,7 @@ export const spillere = sqliteTable("spillere", {
 // # Indeholder oplysninger om en træningssession og dens tilknytning til et hold
 export const traeninger = sqliteTable("traeninger", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  holdId: integer("hold_id").notNull().references(() => hold.id, { onDelete: "cascade" }), // # Relation til et hold
+  holdId: integer("hold_id").references(() => hold.id, { onDelete: "cascade" }), // # Relation til et hold (kan være null ved flere hold)
   navn: text("navn").notNull(), // # Træningens navn er påkrævet
   beskrivelse: text("beskrivelse"), // # Valgfri beskrivelse af træningen
   dato: integer("dato", { mode: "timestamp" })
@@ -38,7 +38,53 @@ export const traeninger = sqliteTable("traeninger", {
   oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
+  flereTilmeldte: integer("flere_tilmeldte", { mode: "boolean" }).notNull().default(false), // # Flag der indikerer om der er flere hold tilmeldt
 });
+
+// # Tabel for hold der deltager i en træning
+// # Bruges til at forbinde træninger med flere hold
+export const traeningHold = sqliteTable(
+  "traening_hold",
+  {
+    traeningId: integer("traening_id")
+      .notNull()
+      .references(() => traeninger.id, { onDelete: "cascade" }), // # Reference til træning
+    holdId: integer("hold_id")
+      .notNull()
+      .references(() => hold.id, { onDelete: "cascade" }), // # Reference til hold
+    tilmeldtDato: integer("tilmeldt_dato", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()), // # Dato for tilmelding
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.traeningId, table.holdId] }), // # Primærnøgle er kombinationen af træning-id og hold-id
+    };
+  }
+);
+
+// # Tabel for spillere der deltager i en træning
+// # Bruges til at registrere hvilke spillere der er til stede
+export const traeningDeltager = sqliteTable(
+  "traening_deltager",
+  {
+    traeningId: integer("traening_id")
+      .notNull()
+      .references(() => traeninger.id, { onDelete: "cascade" }), // # Reference til træning
+    spillerId: integer("spiller_id")
+      .notNull()
+      .references(() => spillere.id, { onDelete: "cascade" }), // # Reference til spiller
+    tilstede: integer("tilstede", { mode: "boolean" }).notNull().default(true), // # Om spilleren er til stede
+    registreretDato: integer("registreret_dato", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()), // # Dato for registrering
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.traeningId, table.spillerId] }), // # Primærnøgle er kombinationen af træning-id og spiller-id
+    };
+  }
+);
 
 // # Offensive positioner for en spiller
 // # En spiller kan have flere offensive positioner, hvoraf én kan være primær

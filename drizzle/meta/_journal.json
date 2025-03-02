@@ -15,6 +15,13 @@
       "when": 1740917924100,
       "tag": "0001_cute_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1740919787453,
+      "tag": "0002_bent_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

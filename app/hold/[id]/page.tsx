@@ -8,9 +8,9 @@ import OpretSpillerDialog from "@/app/hold/[id]/opret-spiller-dialog";
 
 // # Props til siden
 interface HoldPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 // # Interface til offensive/defensive positioner for en spiller
@@ -21,8 +21,9 @@ interface Position {
 
 export default async function HoldDetailPage({ params }: HoldPageProps) {
   // # Konverter ID fra string til number
-  // # Params er ikke længere en Promise i Next.js 15.2.0
-  const { id } = params;
+  // # I Next.js 15.2.0 skal params afventes før brug
+  const resolvedParams = await params;
+  const id = resolvedParams.id;
   const holdId = parseInt(id);
   
   // # Tjek om ID er gyldigt

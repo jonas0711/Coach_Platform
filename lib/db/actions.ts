@@ -119,57 +119,58 @@ export async function opretSpiller(holdId: number, spillerData: SpillerData) {
   }
 
   try {
-    // # Denne funktion bruger better-sqlite3 direkte
-    // # For at fikse problemet med .returning() i SQLite, bruger vi en transaktion
-    // # og henter det sidste indsatte ID direkte
-    const spillerId = db.transaction((tx) => {
-      // # Opret spiller
-      console.log(`Opretter spiller med navn "${spillerData.navn}" til hold med ID: ${holdId}`);
-      
-      // # Indsæt spiller uden at bruge .returning()
-      tx.insert(spillere).values({
-        holdId,
-        navn: spillerData.navn,
-        nummer: spillerData.nummer,
-        erMV: spillerData.erMV,
-      });
-      
-      // # Hent det sidst indsatte ID fra en specifik forespørgsel
-      // # Dette er en specifik tilgang til SQLite
-      const result = tx.all('SELECT last_insert_rowid() as id');
-      
-      if (!result || !Array.isArray(result) || result.length === 0) {
-        throw new Error("Kunne ikke hente ID for den nyoprettede spiller");
-      }
-      
-      // # Sikker typekonvertering for SQLite-resultatet
-      const spillerId = (result[0] as { id: number }).id;
-      console.log(`Spiller oprettet med ID: ${spillerId}`);
-      
-      // # Hvis ikke målvogter, opret positioner
-      if (!spillerData.erMV) {
-        // # Opret offensive positioner
-        for (const pos of spillerData.offensivePositioner) {
-          tx.insert(offensivePositioner).values({
-            spillerId,
-            position: pos.position,
-            erPrimaer: pos.erPrimaer,
-          });
-        }
-
-        // # Opret defensive positioner
-        for (const pos of spillerData.defensivePositioner) {
-          tx.insert(defensivePositioner).values({
-            spillerId,
-            position: pos.position,
-            erPrimaer: pos.erPrimaer,
-          });
-        }
-      }
-      
-      return spillerId;
+    // # Indsæt spiller uden transaktion først, så vi kan få ID'et
+    console.log(`Opretter spiller med navn "${spillerData.navn}" til hold med ID: ${holdId}`);
+    
+    // # Indsæt spiller med almindelig Drizzle tilgang
+    await db.insert(spillere).values({
+      holdId,
+      navn: spillerData.navn,
+      nummer: spillerData.nummer,
+      erMV: spillerData.erMV,
     });
+    
+    // # Få id for sidst indsatte spiller ved at søge efter navn og holdId
+    const sidstIndsatteSpiller = await db.select()
+      .from(spillere)
+      .where(and(
+        eq(spillere.navn, spillerData.navn),
+        eq(spillere.holdId, holdId)
+      ))
+      .orderBy(spillere.id)
+      .limit(1);
+    
+    // # Sikker kontrol af resultatet
+    if (!sidstIndsatteSpiller || sidstIndsatteSpiller.length === 0) {
+      throw new Error("Kunne ikke finde den nyoprettede spiller");
+    }
+    
+    // # Udpak id
+    const spillerId = sidstIndsatteSpiller[0].id;
+    
+    console.log(`Spiller oprettet med ID: ${spillerId}`);
+    
+    // # Hvis ikke målvogter, opret positioner
+    if (!spillerData.erMV) {
+      // # Opret offensive positioner
+      for (const pos of spillerData.offensivePositioner) {
+        await db.insert(offensivePositioner).values({
+          spillerId,
+          position: pos.position,
+          erPrimaer: pos.erPrimaer,
+        });
+      }
 
+      // # Opret defensive positioner
+      for (const pos of spillerData.defensivePositioner) {
+        await db.insert(defensivePositioner).values({
+          spillerId,
+          position: pos.position,
+          erPrimaer: pos.erPrimaer,
+        });
+      }
+    }
+    
     // # Revalidér stien så siden opdateres
     revalidatePath(`/hold/${holdId}`);
     

@@ -9,29 +9,43 @@ import { homedir } from "os";
 // # Opret databasemappen i brugerens hjemmemappe, hvis den ikke eksisterer
 const dbPath = join(process.cwd(), "coach-platform.db");
 
-// # Printstatement til at vise databasestien ved opstart
-console.log(`Database path: ${dbPath}`);
+// # Singleton-mønster for databaseforbindelsen
+// # Dette sikrer at vi kun opretter én forbindelse gennem applikationens levetid
+let sqlite: Database.Database | null = null;
+let dbInstance: ReturnType<typeof drizzle> | null = null;
 
-// # Opret SQLite-databaseforbindelse
-// # Med bedre fejlhåndtering, men stadig direkte
-let sqlite: Database.Database;
+// # Funktion til at få databaseforbindelsen
+function getDb() {
+  // # Hvis databaseforbindelsen allerede eksisterer, genbrug den
+  if (dbInstance) {
+    return dbInstance;
+  }
 
-try {
-  // # Forsøg at oprette databaseforbindelsen
-  sqlite = new Database(dbPath);
-  
-  // # Log succesbesked
-  console.log("Database connection established successfully");
-} catch (error) {
-  // # Hvis der opstår en fejl, log detaljer
-  console.error("Failed to connect to database:", error);
-  
-  // # Kast fejlen videre, så vi undgår at fortsætte med en ugyldig forbindelse
-  throw new Error(`Database connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+  // # Printstatement til at vise databasestien kun ved første oprettelse
+  console.log(`Database path: ${dbPath}`);
+
+  try {
+    // # Forsøg at oprette databaseforbindelsen, hvis den ikke allerede eksisterer
+    if (!sqlite) {
+      sqlite = new Database(dbPath);
+      console.log("Database connection established successfully");
+    }
+    
+    // # Opret drizzle-klienten med vores schema
+    dbInstance = drizzle(sqlite, { schema });
+    
+    return dbInstance;
+  } catch (error) {
+    // # Hvis der opstår en fejl, log detaljer
+    console.error("Failed to connect to database:", error);
+    
+    // # Kast fejlen videre, så vi undgår at fortsætte med en ugyldig forbindelse
+    throw new Error(`Database connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
 }
 
-// # Opret drizzle-klienten med vores schema
-export const db = drizzle(sqlite, { schema });
+// # Eksporter db som en funktion, der returnerer databasen
+export const db = getDb();
 
 // # Eksporter databaseskemaet for nem adgang
 export * from "./schema"; 

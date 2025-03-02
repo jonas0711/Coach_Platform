@@ -23,9 +23,6 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               <Link href="/traening" className="text-sm font-medium hover:text-primary transition-colors">
                 Træning
               </Link>
-              <Link href="/traener" className="text-sm font-medium hover:text-primary transition-colors">
-                Træner
-              </Link>
             </div>
           </nav>
           {/* # Tema-toggle i højre side */}

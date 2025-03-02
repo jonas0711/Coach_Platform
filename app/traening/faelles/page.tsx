@@ -5,7 +5,7 @@ import { da } from "date-fns/locale";
 import { Plus, Calendar, Clock, Trophy, Users } from "lucide-react";
 import { db } from "@/lib/db";
 import { traeninger, traeningHold, hold } from "@/lib/db/schema";
-import { eq, desc, count } from "drizzle-orm";
+import { eq, desc, count, inArray } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,10 +24,22 @@ export const metadata = {
   description: "Administrer fælles træninger med flere hold",
 };
 
+// # Interface for træning med hold data
+interface TraeningMedHold {
+  id: number;
+  navn: string;
+  beskrivelse: string | null;
+  dato: Date;
+  oprettetDato: Date;
+  holdCount: number;
+  holdNavne: string[];
+}
+
 // # Hent alle fælles træninger med antallet af hold tilmeldt
-async function hentFaellesTraeninger() {
+async function hentFaellesTraeninger(): Promise<TraeningMedHold[]> {
   try {
-    // # Hent fælles træninger med join til traeningHold for at tælle hold
+    // # OPTIMERET VERSION, nu uden db.query relations API
+    // # Hent træninger med join til traeningHold for at tælle hold
     const traeningsmøder = await db
       .select({
         id: traeninger.id,
@@ -35,6 +47,7 @@ async function hentFaellesTraeninger() {
         beskrivelse: traeninger.beskrivelse,
         dato: traeninger.dato,
         oprettetDato: traeninger.oprettetDato,
+        flereTilmeldte: traeninger.flereTilmeldte,
         holdCount: count(traeningHold.holdId).as("holdCount"),
       })
       .from(traeninger)
@@ -43,23 +56,34 @@ async function hentFaellesTraeninger() {
       .groupBy(traeninger.id)
       .orderBy(desc(traeninger.dato));
 
-    // # For hver træning, hent navnene på de tilmeldte hold
-    const traeningsmøderMedHold = await Promise.all(
-      traeningsmøder.map(async (traening) => {
-        const tilmeldteHold = await db
-          .select({
-            navn: hold.navn,
-          })
-          .from(traeningHold)
-          .innerJoin(hold, eq(traeningHold.holdId, hold.id))
-          .where(eq(traeningHold.traeningId, traening.id));
-
-        return {
-          ...traening,
-          holdNavne: tilmeldteHold.map((h) => h.navn),
-        };
+    // # For hver træning, hent navnene på de tilmeldte hold, men nu med færre forespørgsler
+    // # Hent alle holdtilmeldinger på én gang og fordel dem derefter
+    const holdTilmeldinger = await db
+      .select({
+        traeningId: traeningHold.traeningId,
+        holdNavn: hold.navn,
       })
-    );
+      .from(traeningHold)
+      .innerJoin(hold, eq(traeningHold.holdId, hold.id))
+      .where(inArray(traeningHold.traeningId, traeningsmøder.map(t => t.id)));
+
+    // # Organiser holdnavne efter trænings-ID
+    const holdNavneMap = holdTilmeldinger.reduce((acc, curr) => {
+      const { traeningId, holdNavn } = curr;
+      if (!acc[traeningId]) {
+        acc[traeningId] = [];
+      }
+      acc[traeningId].push(holdNavn);
+      return acc;
+    }, {} as Record<number, string[]>);
+
+    // # Sammensæt de endelige data
+    const traeningsmøderMedHold = traeningsmøder.map((traening) => {
+      return {
+        ...traening,
+        holdNavne: holdNavneMap[traening.id] || [],
+      };
+    });
 
     return traeningsmøderMedHold;
   } catch (error) {
@@ -95,7 +119,7 @@ export default async function FaellesTraeningerPage() {
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {traeningsmøder.map((traening) => (
+          {traeningsmøder.map((traening: TraeningMedHold) => (
             <Card key={traening.id} className="overflow-hidden">
               <CardHeader className="pb-3">
                 <CardTitle className="truncate">{traening.navn}</CardTitle>
@@ -125,7 +149,7 @@ export default async function FaellesTraeningerPage() {
                   
                   {traening.holdNavne.length > 0 && (
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {traening.holdNavne.map((holdNavn, index) => (
+                      {traening.holdNavne.map((holdNavn: string, index: number) => (
                         <Badge key={index} variant="outline">
                           {holdNavn}
                         </Badge>

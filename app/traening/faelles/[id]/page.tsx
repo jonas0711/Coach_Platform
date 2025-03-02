@@ -31,7 +31,7 @@ import { TraeningDetaljer } from "./traening-detaljer";
 import { Separator } from "@/components/ui/separator";
 import { db } from "@/lib/db";
 import { traeninger, traeningHold, hold, spillere } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 // # Funktion der genererer metadata for siden (sidetitel)
 export async function generateMetadata({ params }: { params: { id: string } }) {
@@ -55,68 +55,70 @@ interface TraeningPageParams {
 // # Hent data for træningen og tilknyttede detaljer
 async function getTraeningData(id: number) {
   try {
-    // # Hent træningsdata
-    const trainingData = await db
-      .select()
-      .from(traeninger)
-      .where(eq(traeninger.id, id))
-      .limit(1);
+    // # OPGRADERET VERSION: Kører parallelle forespørgsler men uden at bruge relations API
+    // # der forårsagede TypeError: Cannot read properties of undefined (reading 'referencedTable')
     
-    if (!trainingData.length) {
-      return null;
-    }
-    
-    // # Hent hold, der er tilmeldt træningen
-    const tilmeldteHold = await db
-      .select({
+    // # Brug Promise.all til at køre forespørgsler parallelt
+    const [trainingDataResult, tilmeldteHoldResult, alleHoldResult, tilstedevaerelsesData] = await Promise.all([
+      // # Hent træningsdata
+      db.select()
+        .from(traeninger)
+        .where(eq(traeninger.id, id))
+        .limit(1),
+      
+      // # Hent hold, der er tilmeldt træningen
+      db.select({
         traening_hold_id: traeningHold.traeningId,
         hold_id: traeningHold.holdId,
         hold_navn: hold.navn
       })
       .from(traeningHold)
       .innerJoin(hold, eq(traeningHold.holdId, hold.id))
-      .where(eq(traeningHold.traeningId, id));
-    
-    // # Hent alle hold, der kan tilmeldes til en træning
-    const alleHold = await db
-      .select({
+      .where(eq(traeningHold.traeningId, id)),
+      
+      // # Hent alle hold
+      db.select({
         id: hold.id,
         navn: hold.navn
       })
       .from(hold)
-      .orderBy(hold.navn);
-
-    // # Hent alle spillere fra de tilmeldte hold
-    let alleSpillereListe: any[] = [];
+      .orderBy(hold.navn),
+      
+      // # Hent tilstedeværelsesdata
+      hentTilstedevarelse(id)
+    ]);
     
-    if (tilmeldteHold.length > 0) {
-      // # For hvert tilmeldt hold, hent dets spillere
-      for (const holdInfo of tilmeldteHold) {
-        const spillereListe = await db
-          .select({
-            spiller_id: spillere.id,
-            navn: spillere.navn,
-            nummer: spillere.nummer,
-            holdId: spillere.holdId,
-            holdNavn: hold.navn,
-            erMaalMand: spillere.erMV
-          })
-          .from(spillere)
-          .innerJoin(hold, eq(spillere.holdId, hold.id))
-          .where(eq(spillere.holdId, holdInfo.hold_id));
-          
-        alleSpillereListe = [...alleSpillereListe, ...spillereListe];
-      }
+    if (!trainingDataResult.length) {
+      return null;
     }
     
-    // # Hent tilstedeværelsesdata
-    const tilstedevaerelsesData = await hentTilstedevarelse(id);
+    // # Optimeret hentning af alle spillere fra tilmeldte hold
+    const holdIds = tilmeldteHoldResult.map(h => h.hold_id);
+    
+    // # Hent alle spillere for de relevante hold i én forespørgsel, hvis der er tilmeldte hold
+    let alleSpillereListe = [];
+    if (holdIds.length > 0) {
+      const spillereListe = await db
+        .select({
+          spiller_id: spillere.id,
+          navn: spillere.navn,
+          nummer: spillere.nummer,
+          holdId: spillere.holdId,
+          holdNavn: hold.navn,
+          erMaalMand: spillere.erMV
+        })
+        .from(spillere)
+        .innerJoin(hold, eq(spillere.holdId, hold.id))
+        .where(inArray(spillere.holdId, holdIds));
+        
+      alleSpillereListe = spillereListe;
+    }
     
     // # Returner alle de hentede data struktureret
     return {
-      traening: trainingData[0],
-      tilmeldteHold,
-      alleHold,
+      traening: trainingDataResult[0],
+      tilmeldteHold: tilmeldteHoldResult,
+      alleHold: alleHoldResult,
       spillere: alleSpillereListe,
       tilstedevaerelsesData
     };

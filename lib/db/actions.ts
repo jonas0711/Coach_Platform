@@ -1,6 +1,6 @@
 "use server";
 
-import { db, hold, spillere, offensivePositioner, defensivePositioner, traeninger, traeningHold, traeningDeltager } from "./index";
+import { db, hold, spillere, offensivePositioner, defensivePositioner, traeninger, traeningHold, traeningDeltager, oevelser, oevelsePositioner, kategorier, fokuspunkter, oevelseFokuspunkter } from "./index";
 import { eq, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -32,6 +32,30 @@ export interface TraeningData {
   beskrivelse?: string;
   dato?: Date;
   holdIds?: number[]; // # Array af holdIds, hvis træningen har flere tilknyttede hold
+}
+
+// # Interface for øvelses data
+export interface OevelseData {
+  navn: string;
+  beskrivelse?: string;
+  billedeSti?: string;
+  brugerPositioner: boolean;
+  minimumDeltagere?: number;
+  positioner?: {
+    position: string;
+    antalKraevet: number;
+    erOffensiv: boolean;
+  }[];
+  kategori?: string; // # Kategoriens navn
+  fokuspunkter?: string; // # Kommasepareret liste af fokuspunkter
+}
+
+// # Interface for øvelses positioner
+export interface OevelsePosition {
+  oevelseId: number;
+  position: string;
+  antalKraevet: number;
+  erOffensiv: boolean;
 }
 
 // # Opret nyt hold
@@ -526,11 +550,34 @@ export async function opretTraening(traeningData: TraeningData) {
 
 // # Opret fælles træning (med flere hold)
 export async function opretFaellesTraening(traeningData: TraeningData) {
-  // # Sæt flereTilmeldte flag til true
-  return opretTraening({
-    ...traeningData,
-    flereTilmeldte: true
-  });
+  // # Her bruger vi den normale opretTraening funktion med flereTilmeldte = true
+  const resultat = await db.insert(traeninger).values({
+    navn: traeningData.navn,
+    beskrivelse: traeningData.beskrivelse,
+    dato: traeningData.dato || new Date(),
+    flereTilmeldte: true,
+  }).returning({ id: traeninger.id });
+
+  const traeningId = resultat[0].id;
+  
+  // # Hvis der er tilknyttede hold, opret relationer
+  if (Array.isArray(traeningData.holdIds)) {
+    console.log(`Tilmelder ${traeningData.holdIds.length} hold til træningen`);
+    
+    // # Opret en relation for hvert hold
+    for (const holdId of traeningData.holdIds) {
+      await db.insert(traeningHold).values({
+        traeningId,
+        holdId,
+      });
+    }
+  }
+  
+  // # Revalidér stien så siden opdateres
+  revalidatePath("/traening");
+  
+  // # Returner det oprettede trænings ID
+  return traeningId;
 }
 
 // # Hent specifik træning med ID
@@ -766,5 +813,493 @@ export async function hentTilstedevarelse(traeningId: number) {
     // # Log fejl og videregiv den til kalderen
     console.error(`Fejl ved hentning af tilstedeværelse for træning ${traeningId}:`, error);
     throw new Error(`Kunde ikke hente tilstedeværelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Øvelses-relaterede database funktioner
+
+// # Opret ny øvelse
+export async function opretOevelse(oevelseData: OevelseData) {
+  // # Validér at navn ikke er tomt
+  if (!oevelseData.navn || oevelseData.navn.trim() === "") {
+    throw new Error("Øvelsesnavn må ikke være tomt");
+  }
+
+  // # Tjek om øvelsen bruger positioner eller minimumDeltagere
+  if (oevelseData.brugerPositioner && (!oevelseData.positioner || oevelseData.positioner.length === 0)) {
+    throw new Error("Øvelsen skal have positioner, når 'brugerPositioner' er true");
+  }
+
+  if (!oevelseData.brugerPositioner && !oevelseData.minimumDeltagere) {
+    throw new Error("Øvelsen skal have minimumDeltagere, når 'brugerPositioner' er false");
+  }
+
+  try {
+    // # OPTIMERING: Brug én enkelt transaktion for alle operationer
+    console.log(`Starter oprettelse af øvelse: ${oevelseData.navn}`);
+    
+    // # Find eller opret kategori hvis angivet
+    let kategoriId: number | undefined = undefined;
+    if (oevelseData.kategori && oevelseData.kategori.trim() !== "") {
+      // # Tjek om kategorien allerede findes
+      console.log(`Søger efter kategori: ${oevelseData.kategori}`);
+      const eksisterendeKategori = await db.select({
+          id: kategorier.id,
+          navn: kategorier.navn
+        })
+        .from(kategorier)
+        .where(eq(kategorier.navn, oevelseData.kategori));
+      
+      if (eksisterendeKategori.length > 0) {
+        // # Brug eksisterende kategori
+        kategoriId = eksisterendeKategori[0].id;
+        console.log(`Bruger eksisterende kategori med ID: ${kategoriId}`);
+      } else {
+        // # Opret ny kategori
+        console.log(`Opretter ny kategori: ${oevelseData.kategori}`);
+        const nyKategori = await db.insert(kategorier).values({
+          navn: oevelseData.kategori,
+          // # Brug et Date-objekt til oprettelses-datoen (automatisk håndteret af databasen)
+        }).returning({ id: kategorier.id });
+        
+        kategoriId = nyKategori[0].id;
+        console.log(`Ny kategori oprettet med ID: ${kategoriId}`);
+      }
+    }
+    
+    // # Indsæt øvelse i databasen
+    console.log(`Opretter øvelse med navn: ${oevelseData.navn}`);
+    
+    // # Forbered data til indsættelse
+    const oevelseDataToDB: any = {
+      navn: oevelseData.navn,
+      brugerPositioner: oevelseData.brugerPositioner,
+      minimumDeltagere: oevelseData.minimumDeltagere,
+      kategoriId: kategoriId
+    };
+    
+    // # Sæt beskrivelse kun hvis den findes og ikke er tom
+    if (oevelseData.beskrivelse && oevelseData.beskrivelse.trim() !== "") {
+      oevelseDataToDB.beskrivelse = oevelseData.beskrivelse;
+    }
+    
+    // # Sæt billedeSti hvis det findes
+    if (oevelseData.billedeSti) {
+      oevelseDataToDB.billedeSti = oevelseData.billedeSti;
+    }
+    
+    // # Indsæt øvelse i databasen
+    const result = await db.insert(oevelser).values(oevelseDataToDB).returning({ id: oevelser.id });
+    
+    const oevelseId = result[0].id;
+    
+    // # OPTIMERING: Håndter positioner i batch hvis de findes
+    if (oevelseData.brugerPositioner && oevelseData.positioner) {
+      console.log(`Tilføjer ${oevelseData.positioner.length} positioner til øvelsen`);
+      
+      // # Forbered alle positioner til batch indsættelse
+      const positionerMedKrav = oevelseData.positioner.filter(p => p.antalKraevet > 0);
+      
+      if (positionerMedKrav.length > 0) {
+        // # Indsæt alle positioner i en enkelt forespørgsel
+        await db.insert(oevelsePositioner).values(
+          positionerMedKrav.map(position => ({
+            oevelseId,
+            position: position.position,
+            antalKraevet: position.antalKraevet,
+            erOffensiv: position.erOffensiv,
+          }))
+        );
+      }
+    }
+    
+    // # OPTIMERING: Håndter fokuspunkter mere effektivt
+    if (oevelseData.fokuspunkter && oevelseData.fokuspunkter.trim() !== "") {
+      // # Split fokuspunkterne ved linjeskift eller komma
+      const fokuspunktListe = oevelseData.fokuspunkter.split(/[\n,]/).map(fp => fp.trim()).filter(fp => fp !== "");
+      
+      if (fokuspunktListe.length > 0) {
+        console.log(`Behandler ${fokuspunktListe.length} fokuspunkter`);
+        
+        // # 1. Hent alle eksisterende fokuspunkter på én gang
+        const alleFokuspunkter = await db.select({
+            id: fokuspunkter.id,
+            tekst: fokuspunkter.tekst
+          })
+          .from(fokuspunkter)
+          .where(inArray(fokuspunkter.tekst, fokuspunktListe));
+          
+        // # Lav et map fra tekst til id for hurtig opslag
+        const eksisterendeFokuspunkterMap = new Map(
+          alleFokuspunkter.map(fp => [fp.tekst, fp.id])
+        );
+        
+        // # 2. Find hvilke fokuspunkter der skal oprettes
+        const nyeFokuspunkterTekst = fokuspunktListe.filter(
+          tekst => !eksisterendeFokuspunkterMap.has(tekst)
+        );
+        
+        // # 3. Opret nye fokuspunkter i en batch hvis der er nogen
+        let nyeFokuspunkterIds: number[] = [];
+        if (nyeFokuspunkterTekst.length > 0) {
+          console.log(`Opretter ${nyeFokuspunkterTekst.length} nye fokuspunkter`);
+          const nyeFokuspunkter = await db.insert(fokuspunkter)
+            .values(nyeFokuspunkterTekst.map(tekst => ({ tekst })))
+              .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
+            
+          // # Opdater map med de nye fokuspunkter
+          nyeFokuspunkter.forEach(fp => {
+            eksisterendeFokuspunkterMap.set(fp.tekst, fp.id);
+          });
+          
+          nyeFokuspunkterIds = nyeFokuspunkter.map(fp => fp.id);
+        }
+        
+        // # 4. Indsæt alle relationer på én gang
+        const relationer = fokuspunktListe.map(tekst => ({
+          oevelseId,
+          fokuspunktId: eksisterendeFokuspunkterMap.get(tekst)!
+        }));
+        
+        if (relationer.length > 0) {
+          await db.insert(oevelseFokuspunkter).values(relationer);
+        }
+      }
+    }
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath("/traening");
+    
+    // # Returner det oprettede øvelses ID
+    return oevelseId;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error("Fejl ved oprettelse af øvelse:", error);
+    throw new Error(`Kunne ikke oprette øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent alle øvelser
+export async function hentAlleOevelser() {
+  try {
+    // # Hent alle øvelser med deres kategorier
+    console.log("Henter øvelser fra databasen");
+    
+    return await db
+      .select({
+        id: oevelser.id,
+        navn: oevelser.navn,
+        beskrivelse: oevelser.beskrivelse,
+        billedeSti: oevelser.billedeSti,
+        brugerPositioner: oevelser.brugerPositioner,
+        minimumDeltagere: oevelser.minimumDeltagere,
+        kategoriId: oevelser.kategoriId,
+        kategoriNavn: kategorier.navn,
+        oprettetDato: oevelser.oprettetDato,
+      })
+      .from(oevelser)
+      .leftJoin(kategorier, eq(oevelser.kategoriId, kategorier.id))
+      .orderBy(oevelser.oprettetDato);
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error("Fejl ved hentning af øvelser:", error);
+    throw new Error(`Kunne ikke hente øvelser: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent specifik øvelse med ID
+export async function hentOevelse(oevelseId: number) {
+  console.log(`Henter øvelse med ID: ${oevelseId}`);
+  
+  try {
+    // # Først henter vi grundlæggende øvelsesinformation
+    const oevelse = await db.select().from(oevelser).where(eq(oevelser.id, oevelseId)).limit(1);
+
+    if (!oevelse || oevelse.length === 0) {
+      console.error(`Kunne ikke finde øvelse med ID: ${oevelseId}`);
+      return null;
+    }
+
+    const oevelseData = oevelse[0];
+
+    // # Henter positioner for øvelsen hvis den bruger positioner
+    const positionerListe = oevelseData.brugerPositioner 
+      ? await db.select().from(oevelsePositioner).where(eq(oevelsePositioner.oevelseId, oevelseId))
+      : [];
+    
+    // # Henter kategori information hvis den har en kategori
+    let kategoriData = null;
+    if (oevelseData.kategoriId) {
+      const kategoriResult = await db.select().from(kategorier).where(eq(kategorier.id, oevelseData.kategoriId)).limit(1);
+      if (kategoriResult.length > 0) {
+        kategoriData = kategoriResult[0];
+      }
+    }
+    
+    // # Henter fokuspunkter for øvelsen
+    const fokusListe = await db.select().from(oevelseFokuspunkter).where(eq(oevelseFokuspunkter.oevelseId, oevelseId));
+    
+    // # Henter detaljeret information om fokuspunkterne
+    const fokuspunktData = await db.select()
+      .from(fokuspunkter)
+      .where(fokusListe.length > 0 ? inArray(fokuspunkter.id, fokusListe.map(f => f.fokuspunktId)) : eq(fokuspunkter.id, -1));
+    
+    // # Returnerer øvelsen med alle relaterede data
+    return {
+      ...oevelseData,
+      positioner: positionerListe,
+      kategori: kategoriData,
+      fokuspunkter: fokuspunktData
+    };
+  } catch (error) {
+    console.error("Fejl ved hentning af øvelse:", error);
+    throw new Error("Der opstod en fejl ved hentning af øvelsesdetaljer");
+  }
+}
+
+// # Hent alle kategorier
+export async function hentAlleKategorier() {
+  try {
+    // # Hent alle kategorier sorteret efter navn
+    return await db.select({
+      id: kategorier.id,
+      navn: kategorier.navn,
+      oprettetDato: kategorier.oprettetDato
+    })
+    .from(kategorier)
+    .orderBy(kategorier.navn);
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error("Fejl ved hentning af kategorier:", error);
+    throw new Error(`Kunne ikke hente kategorier: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent alle fokuspunkter
+export async function hentAlleFokuspunkter() {
+  try {
+    // # Hent alle fokuspunkter sorteret efter tekst
+    return await db.select({
+      id: fokuspunkter.id,
+      tekst: fokuspunkter.tekst,
+      oprettetDato: fokuspunkter.oprettetDato
+    })
+    .from(fokuspunkter)
+    .orderBy(fokuspunkter.tekst);
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error("Fejl ved hentning af fokuspunkter:", error);
+    throw new Error(`Kunne ikke hente fokuspunkter: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Slet en øvelse med det angivne ID
+export async function sletOevelse(oevelseId: number) {
+  try {
+    console.log(`Forsøger at slette øvelse med ID: ${oevelseId}`);
+    
+    // # Slet øvelsen - relaterede data som fokuspunkter og positioner slettes automatisk pga. cascade
+    const result = await db.delete(oevelser)
+      .where(eq(oevelser.id, oevelseId))
+      .returning({ id: oevelser.id });
+    
+    if (result.length === 0) {
+      throw new Error(`Øvelse med ID ${oevelseId} findes ikke`);
+    }
+    
+    console.log(`Øvelse med ID ${oevelseId} er blevet slettet`);
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath("/traening/oevelser");
+    
+    return true;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved sletning af øvelse med ID ${oevelseId}:`, error);
+    throw new Error(`Kunne ikke slette øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Opdater en eksisterende øvelse
+export async function opdaterOevelse(oevelseId: number, oevelseData: OevelseData) {
+  // # Validér at navn ikke er tomt
+  if (!oevelseData.navn || oevelseData.navn.trim() === "") {
+    throw new Error("Øvelsesnavn må ikke være tomt");
+  }
+
+  // # Tjek om øvelsen bruger positioner eller minimumDeltagere
+  if (oevelseData.brugerPositioner && (!oevelseData.positioner || oevelseData.positioner.length === 0)) {
+    throw new Error("Øvelsen skal have positioner, når 'brugerPositioner' er true");
+  }
+
+  if (!oevelseData.brugerPositioner && !oevelseData.minimumDeltagere) {
+    throw new Error("Øvelsen skal have minimumDeltagere, når 'brugerPositioner' er false");
+  }
+
+  try {
+    console.log(`Opdaterer øvelse med ID: ${oevelseId}`);
+    
+    // # Find eller opret kategori hvis angivet
+    let kategoriId: number | undefined = undefined;
+    if (oevelseData.kategori && oevelseData.kategori.trim() !== "") {
+      // # Tjek om kategorien allerede findes
+      console.log(`Søger efter kategori: ${oevelseData.kategori}`);
+      const eksisterendeKategori = await db.select({
+          id: kategorier.id,
+          navn: kategorier.navn
+        })
+        .from(kategorier)
+        .where(eq(kategorier.navn, oevelseData.kategori));
+      
+      if (eksisterendeKategori.length > 0) {
+        // # Brug eksisterende kategori
+        kategoriId = eksisterendeKategori[0].id;
+        console.log(`Bruger eksisterende kategori med ID: ${kategoriId}`);
+      } else {
+        // # Opret ny kategori
+        console.log(`Opretter ny kategori: ${oevelseData.kategori}`);
+        const nyKategori = await db.insert(kategorier).values({
+          navn: oevelseData.kategori,
+        }).returning({ id: kategorier.id });
+        
+        kategoriId = nyKategori[0].id;
+        console.log(`Ny kategori oprettet med ID: ${kategoriId}`);
+      }
+    }
+    
+    // # Forbered data til opdatering
+    const oevelseDataToDB: any = {
+      navn: oevelseData.navn,
+      brugerPositioner: oevelseData.brugerPositioner,
+      minimumDeltagere: oevelseData.minimumDeltagere,
+      kategoriId: kategoriId
+    };
+    
+    // # Sæt beskrivelse kun hvis den findes og ikke er tom
+    if (oevelseData.beskrivelse && oevelseData.beskrivelse.trim() !== "") {
+      oevelseDataToDB.beskrivelse = oevelseData.beskrivelse;
+    } else {
+      oevelseDataToDB.beskrivelse = null; // # Nulstil beskrivelsen hvis tom
+    }
+    
+    // # Sæt billedeSti hvis det findes
+    if (oevelseData.billedeSti) {
+      oevelseDataToDB.billedeSti = oevelseData.billedeSti;
+    }
+    
+    // # Opdater øvelse i databasen
+    const result = await db.update(oevelser)
+      .set(oevelseDataToDB)
+      .where(eq(oevelser.id, oevelseId))
+      .returning({ id: oevelser.id });
+      
+    if (result.length === 0) {
+      throw new Error(`Øvelse med ID ${oevelseId} findes ikke`);
+    }
+    
+    // # Hvis øvelsen bruger positioner, slet gamle og indsæt nye
+    if (oevelseData.brugerPositioner && oevelseData.positioner) {
+      // # Slet alle eksisterende positioner først
+      await db.delete(oevelsePositioner)
+        .where(eq(oevelsePositioner.oevelseId, oevelseId));
+        
+      // # Forbered alle positioner til batch indsættelse
+      const positionerMedKrav = oevelseData.positioner.filter(p => p.antalKraevet > 0);
+      
+      if (positionerMedKrav.length > 0) {
+        console.log(`Tilføjer ${positionerMedKrav.length} positioner til øvelsen`);
+        
+        // # Indsæt alle positioner i en enkelt forespørgsel
+        await db.insert(oevelsePositioner).values(
+          positionerMedKrav.map(position => ({
+            oevelseId,
+            position: position.position,
+            antalKraevet: position.antalKraevet,
+            erOffensiv: position.erOffensiv,
+          }))
+        );
+      }
+    }
+    
+    // # Håndter fokuspunkter, hvis de er angivet
+    if (oevelseData.fokuspunkter !== undefined) {
+      // # Slet alle eksisterende fokuspunkt-relationer
+      await db.delete(oevelseFokuspunkter)
+        .where(eq(oevelseFokuspunkter.oevelseId, oevelseId));
+      
+      // # Hvis der er angivet nye fokuspunkter, tilføj dem
+      if (oevelseData.fokuspunkter && oevelseData.fokuspunkter.trim() !== "") {
+        // # Split fokuspunkterne ved linjeskift eller komma
+        const fokuspunktListe = oevelseData.fokuspunkter.split(/[\n,]/).map(fp => fp.trim()).filter(fp => fp !== "");
+        
+        if (fokuspunktListe.length > 0) {
+          console.log(`Behandler ${fokuspunktListe.length} fokuspunkter til opdatering`);
+          
+          // # 1. Hent alle eksisterende fokuspunkter på én gang
+          const alleFokuspunkter = await db.select({
+              id: fokuspunkter.id,
+              tekst: fokuspunkter.tekst
+            })
+            .from(fokuspunkter)
+            .where(inArray(fokuspunkter.tekst, fokuspunktListe));
+            
+          // # Lav et map fra tekst til id for hurtig opslag
+          const eksisterendeFokuspunkterMap = new Map(
+            alleFokuspunkter.map(fp => [fp.tekst, fp.id])
+          );
+          
+          // # 2. Find hvilke fokuspunkter der skal oprettes
+          const nyeFokuspunkterTekst = fokuspunktListe.filter(
+            tekst => !eksisterendeFokuspunkterMap.has(tekst)
+          );
+          
+          // # 3. Opret nye fokuspunkter i en batch hvis der er nogen
+          if (nyeFokuspunkterTekst.length > 0) {
+            console.log(`Opretter ${nyeFokuspunkterTekst.length} nye fokuspunkter ved opdatering`);
+            const nyeFokuspunkter = await db.insert(fokuspunkter)
+              .values(nyeFokuspunkterTekst.map(tekst => ({ tekst })))
+                .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
+              
+            // # Opdater map med de nye fokuspunkter
+            nyeFokuspunkter.forEach(fp => {
+              eksisterendeFokuspunkterMap.set(fp.tekst, fp.id);
+            });
+          }
+          
+          // # 4. Indsæt alle relationer på én gang
+          const relationer = fokuspunktListe.map(tekst => ({
+            oevelseId,
+            fokuspunktId: eksisterendeFokuspunkterMap.get(tekst)!
+          }));
+          
+          if (relationer.length > 0) {
+            await db.insert(oevelseFokuspunkter).values(relationer);
+          }
+        }
+      }
+    }
+    
+    // # Revalidér stien så siden opdateres
+    revalidatePath("/traening/oevelser");
+    
+    return oevelseId;
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved opdatering af øvelse med ID ${oevelseId}:`, error);
+    throw new Error(`Kunne ikke opdatere øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent alle positioner (både offensive og defensive)
+export async function hentAllePositioner() {
+  try {
+    // # Returner en samlet liste af alle positioner
+    return {
+      offensive: OFFENSIVE_POSITIONER,
+      defensive: DEFENSIVE_POSITIONER
+    };
+  } catch (error) {
+    console.error("Fejl ved hentning af positioner:", error);
+    throw new Error(`Kunne ikke hente positioner: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
 } 

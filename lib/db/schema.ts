@@ -122,10 +122,90 @@ export const defensivePositioner = sqliteTable(
   }
 );
 
+// # Tabel for kategorier
+// # Indeholder information om kategorier for øvelser
+export const kategorier = sqliteTable("kategorier", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  navn: text("navn").notNull().unique(), // # Kategorinavnet er påkrævet og unikt
+  oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
+});
+
+// # Tabel for fokuspunkter
+// # Indeholder information om fokuspunkter til øvelser
+export const fokuspunkter = sqliteTable("fokuspunkter", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tekst: text("tekst").notNull().unique(), // # Fokuspunktets tekst er påkrævet og unik
+  oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
+});
+
+// # Tabel for øvelser
+// # Indeholder information om træningsøvelser
+export const oevelser = sqliteTable("oevelser", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  navn: text("navn").notNull(), // # Øvelsens navn er påkrævet
+  beskrivelse: text("beskrivelse"), // # Valgfri beskrivelse af øvelsen
+  billedeSti: text("billede_sti"), // # Sti til billede af øvelsen
+  brugerPositioner: integer("bruger_positioner", { mode: "boolean" }).notNull().default(false), // # Flag der indikerer om øvelsen bruger positioner
+  minimumDeltagere: integer("minimum_deltagere"), // # Minimum antal deltagere hvis positioner ikke bruges
+  kategoriId: integer("kategori_id").references(() => kategorier.id), // # Reference til kategori (optional)
+  oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
+});
+
+// # Tabel for positionskrav i øvelser
+// # Definerer hvor mange spillere der kræves for hver position i en øvelse
+export const oevelsePositioner = sqliteTable(
+  "oevelse_positioner",
+  {
+    oevelseId: integer("oevelse_id")
+      .notNull()
+      .references(() => oevelser.id, { onDelete: "cascade" }), // # Reference til øvelse
+    position: text("position").notNull(), // # Positionens navn
+    antalKraevet: integer("antal_kraevet").notNull().default(0), // # Antal påkrævede spillere i denne position
+    erOffensiv: integer("er_offensiv", { mode: "boolean" }).notNull().default(true), // # Om det er en offensiv position
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.oevelseId, table.position] }), // # Primærnøgle er kombinationen af øvelses-id og position
+    };
+  }
+);
+
+// # Tabel for relation mellem øvelser og fokuspunkter
+// # Mange-til-mange relation mellem øvelser og fokuspunkter
+export const oevelseFokuspunkter = sqliteTable(
+  "oevelse_fokuspunkter",
+  {
+    oevelseId: integer("oevelse_id")
+      .notNull()
+      .references(() => oevelser.id, { onDelete: "cascade" }), // # Reference til øvelse
+    fokuspunktId: integer("fokuspunkt_id")
+      .notNull()
+      .references(() => fokuspunkter.id, { onDelete: "cascade" }), // # Reference til fokuspunkt
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.oevelseId, table.fokuspunktId] }), // # Primærnøgle er kombinationen af øvelses-id og fokuspunkt-id
+    };
+  }
+);
+
 // # Konstanter for offensive positioner
 export const OFFENSIVE_POSITIONER = ["VF", "VB", "PM", "HB", "HF", "ST"] as const;
 export type OffensivPosition = typeof OFFENSIVE_POSITIONER[number];
 
 // # Konstanter for defensive positioner
 export const DEFENSIVE_POSITIONER = ["1", "2", "3", "4", "5", "6"] as const;
-export type DefensivPosition = typeof DEFENSIVE_POSITIONER[number]; 
+export type DefensivPosition = typeof DEFENSIVE_POSITIONER[number];
+
+// # Position type for øvelser
+export type Position = {
+  position: string;
+  antalKraevet: number;
+  erOffensiv: boolean;
+}; 

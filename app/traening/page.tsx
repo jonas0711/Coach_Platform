@@ -194,22 +194,46 @@ export default async function TraeningPage() {
             </p>
             
             <div className="flex flex-wrap gap-4 mb-8">
-              <Button>
-                <DumbbellIcon className="mr-2 h-4 w-4" />
-                Opret ny øvelse
-              </Button>
-              <Button variant="outline">
-                <ClipboardList className="mr-2 h-4 w-4" />
-                Se alle kategorier
+              <Button asChild>
+                <Link href="/traening/oevelser">
+                  <DumbbellIcon className="mr-2 h-4 w-4" />
+                  Gå til øvelsesbibliotek
+                </Link>
               </Button>
             </div>
             
-            <div className="bg-muted/40 rounded-lg p-8 text-center">
-              <DumbbellIcon className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-              <h3 className="text-lg font-medium mb-2">Øvelsesbiblioteket kommer snart</h3>
-              <p className="text-muted-foreground mb-4">
-                Vi arbejder på at tilføje et omfattende bibliotek af øvelser. Denne funktion vil være tilgængelig inden længe.
-              </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* # Kort til øvelsesbibliotek */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Find øvelser</CardTitle>
+                  <CardDescription>Gennemse øvelsesbiblioteket</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm">Søg blandt eksisterende øvelser kategoriseret efter type og formål.</p>
+                </CardContent>
+                <CardFooter>
+                  <Button variant="outline" className="w-full" asChild>
+                    <Link href="/traening/oevelser">Se alle øvelser</Link>
+                  </Button>
+                </CardFooter>
+              </Card>
+              
+              {/* # Kort til at oprette øvelser */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Opret øvelse</CardTitle>
+                  <CardDescription>Tilføj dine egne øvelser</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm">Opret tilpassede øvelser med positionskrav eller minimumskrav til deltagere.</p>
+                </CardContent>
+                <CardFooter>
+                  <Button variant="outline" className="w-full" asChild>
+                    <Link href="/traening/oevelser">Opret ny øvelse</Link>
+                  </Button>
+                </CardFooter>
+              </Card>
             </div>
           </div>
         </TabsContent>

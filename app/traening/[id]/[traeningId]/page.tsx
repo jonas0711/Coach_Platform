@@ -23,8 +23,11 @@ import { Toaster } from "sonner";
 import { TilstedeRegistrering } from "./tilstede";
 
 // # Funktion der genererer metadata for siden (sidertitel)
-export async function generateMetadata({ params }: { params: { id: string, traeningId: string } }) {
-  const traening = await hentTraening(parseInt(params.traeningId));
+export async function generateMetadata(props: { params: { id: string, traeningId: string } }) {
+  // # Await params objektet korrekt
+  const params = await props.params;
+  const traeningId = parseInt(params.traeningId);
+  const traening = await hentTraening(traeningId);
   
   return {
     title: traening ? `${traening.navn} - Træning` : "Træning ikke fundet",
@@ -32,8 +35,9 @@ export async function generateMetadata({ params }: { params: { id: string, traen
 }
 
 // # Hovedkomponent for visning af træning
-export default async function TraeningDetaljerPage({ params }: { params: { id: string, traeningId: string } }) {
-  // # Konverter id'er til tal
+export default async function TraeningDetaljerPage(props: { params: { id: string, traeningId: string } }) {
+  // # Await params objektet korrekt
+  const params = await props.params;
   const holdId = parseInt(params.id);
   const traeningId = parseInt(params.traeningId);
   

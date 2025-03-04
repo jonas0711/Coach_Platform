@@ -383,7 +383,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
     form.setValue('fokuspunkter', nyeFokuspunkter.filter(p => p.trim() !== '').join('\n'));
   };
   
-  // Håndter indsendelse af formularen
+  // Sender formularen
   const onSubmit = async (values: FormValues) => {
     try {
       setErIndsendt(true);
@@ -402,7 +402,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
       const fokuspunktListe = values.fokuspunkter?.split(/[\n,]/)
         .map(fp => fp.trim())
         .filter(fp => fp !== "") || [];
-        
+      
       // # Tilføj nye fokuspunkter til lokaleFokuspunkter
       if (fokuspunktListe.length > 0) {
         const nyeFokuspunkter = [...lokaleFokuspunkter];
@@ -479,7 +479,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
       
       // # Opret øvelsen
       console.log("Sender data til databasen...");
-      await opretOevelse({
+      const oevelseId = await opretOevelse({
         navn: values.navn,
         beskrivelse: values.beskrivelse,
         billedeSti,
@@ -487,7 +487,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
         minimumDeltagere: values.brugerPositioner === 'false' ? values.minimumDeltagere : undefined,
         positioner: values.brugerPositioner === 'true' ? positionerData : undefined,
         kategori: values.kategori,
-        fokuspunkter: values.fokuspunkter,
+        fokuspunkter: fokuspunkterState.filter(fp => fp && fp.trim() !== '').join(','),
         variationer: variationsData,
         originalPositionerNavn: values.brugerPositioner === 'true' ? values.originalPositionerNavn : undefined,
       });
@@ -503,33 +503,11 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
         description: `Øvelsen er blevet tilføjet til dit bibliotek på ${tidBrugt} sekunder.`
       });
       
-      // # Nulstil formen og states
-      form.reset();
-      setBillede(null);
-      setFokuspunkterState(['']);
-      setOffensivePositionerState(offensivePositioner.map(position => ({
-        id: `off_${position}`,
-        navn: position,
-        beskrivelse: "Offensiv position",
-        erOffensiv: true,
-        antalKraevet: 0,
-      })));
-      setDefensivePositionerState(defensivePositioner.map(position => ({
-        id: `def_${position}`,
-        navn: position,
-        beskrivelse: "Defensiv position",
-        erOffensiv: false,
-        antalKraevet: 0,
-      })));
-      
-      // # Nulstil erIndsendt før navigation
-      setErIndsendt(false);
-      
-      // # Naviger tilbage til oversigten
-      router.push('/traening/oevelser');
-      router.refresh();
+      // # Naviger til øvelsesoversigten
+      router.push(`/traening/oevelser`);
     } catch (error) {
       // # Vis fejlbesked
+      console.error("Fejl ved oprettelse af øvelse:", error);
       toast({
         title: "Fejl ved oprettelse",
         description: error instanceof Error ? error.message : "Der skete en fejl",
@@ -553,7 +531,11 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form 
+            id="oevelse-form"
+            onSubmit={form.handleSubmit(onSubmit)} 
+            className="space-y-4"
+          >
             {/* Basisinformation */}
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               <FormField
@@ -1075,24 +1057,26 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
               </div>
             )}
             
-            {/* Submit knap */}
-            <Button 
-              type="submit" 
-              disabled={erIndsendt}
-              className="w-full"
-            >
-              {erIndsendt ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Opretter øvelse...
-                </>
-              ) : (
-                <>
-                  <Check className="mr-2 h-4 w-4" />
-                  Opret øvelse
-                </>
-              )}
-            </Button>
+            {/* Submit knapper */}
+            <div className="flex gap-4 mt-6">
+              <Button type="submit" disabled={erIndsendt}>
+                {erIndsendt ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Opretter øvelse...
+                  </>
+                ) : (
+                  "Opret øvelse"
+                )}
+              </Button>
+              <Button 
+                type="button" 
+                variant="outline"
+                onClick={() => router.push('/traening/oevelser')}
+              >
+                Fortryd
+              </Button>
+            </div>
           </form>
         </Form>
       </CardContent>

@@ -118,7 +118,6 @@ export async function hentAlleHold() {
 export async function hentHold(id: number) {
   try {
     // # Hent hold med specifikt ID
-    console.log(`Henter hold med ID: ${id}`);
     const result = await db.select().from(hold).where(eq(hold.id, id));
     
     // # Return null hvis holdet ikke findes
@@ -131,6 +130,31 @@ export async function hentHold(id: number) {
   } catch (error) {
     // # Log fejl og videregiv den til kalderen
     console.error(`Fejl ved hentning af hold med ID ${id}:`, error);
+    throw new Error(`Kunne ikke hente hold: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent hold baseret på navn
+export async function hentHoldMedNavn(navn: string) {
+  try {
+    // # Log forsøget på at hente holdet
+    console.log(`Forsøger at hente hold med navn: ${navn}`);
+    
+    // # Søg efter hold med eksakt navn
+    const result = await db.select().from(hold).where(eq(hold.navn, navn));
+    
+    // # Return null hvis holdet ikke findes
+    if (result.length === 0) {
+      console.log(`Ingen hold fundet med navnet: ${navn}`);
+      return null;
+    }
+    
+    // # Returner det fundne hold
+    console.log(`Hold fundet: ${result[0].navn} (ID: ${result[0].id})`);
+    return result[0];
+  } catch (error) {
+    // # Log fejl og videregiv den til kalderen
+    console.error(`Fejl ved hentning af hold med navn ${navn}:`, error);
     throw new Error(`Kunne ikke hente hold: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
 }
@@ -1533,4 +1557,111 @@ export async function hentAllePositioner() {
     console.error("Fejl ved hentning af positioner:", error);
     throw new Error(`Kunne ikke hente positioner: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
-} 
+}
+
+// # Hent fokuspunkter for en specifik øvelse
+export async function hentOevelseFokuspunkter(oevelseId: number) {
+  try {
+    console.log(`Henter fokuspunkter for øvelse ID: ${oevelseId}`);
+    
+    // # Hent fokuspunkter for øvelsen
+    const fokuspunkterResult = await db.select({
+      id: fokuspunkter.id,
+      tekst: fokuspunkter.tekst
+    })
+    .from(oevelseFokuspunkter)
+    .innerJoin(fokuspunkter, eq(oevelseFokuspunkter.fokuspunktId, fokuspunkter.id))
+    .where(eq(oevelseFokuspunkter.oevelseId, oevelseId));
+    
+    return fokuspunkterResult;
+  } catch (error) {
+    console.error(`Fejl ved hentning af fokuspunkter for øvelse ID: ${oevelseId}:`, error);
+    throw new Error(`Kunne ikke hente fokuspunkter for øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Opret nyt fokuspunkt i databasen
+export async function opretFokuspunkt(tekst: string) {
+  try {
+    console.log(`Forsøger at oprette nyt fokuspunkt: ${tekst}`);
+    
+    // # Tjek om fokuspunktet allerede findes
+    const eksisterendeFokuspunkt = await db.select({
+        id: fokuspunkter.id,
+        tekst: fokuspunkter.tekst
+      })
+      .from(fokuspunkter)
+      .where(eq(fokuspunkter.tekst, tekst))
+      .limit(1);
+    
+    // # Hvis fokuspunktet allerede findes, returner det eksisterende
+    if (eksisterendeFokuspunkt.length > 0) {
+      console.log(`Fokuspunkt '${tekst}' findes allerede med ID: ${eksisterendeFokuspunkt[0].id}`);
+      return {
+        id: eksisterendeFokuspunkt[0].id,
+        tekst: eksisterendeFokuspunkt[0].tekst,
+        nyOprettet: false
+      };
+    }
+    
+    // # Opret nyt fokuspunkt
+    console.log(`Opretter nyt fokuspunkt: ${tekst}`);
+    const nytFokuspunkt = await db.insert(fokuspunkter)
+      .values({ tekst })
+      .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
+    
+    console.log(`Nyt fokuspunkt oprettet med ID: ${nytFokuspunkt[0].id}`);
+    
+    return {
+      id: nytFokuspunkt[0].id,
+      tekst: nytFokuspunkt[0].tekst,
+      nyOprettet: true
+    };
+  } catch (error) {
+    console.error(`Fejl ved oprettelse af fokuspunkt '${tekst}':`, error);
+    throw new Error(`Kunne ikke oprette fokuspunkt: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Opret ny kategori i databasen
+export async function opretKategori(navn: string) {
+  try {
+    console.log(`Forsøger at oprette ny kategori: ${navn}`);
+    
+    // # Tjek om kategorien allerede findes
+    const eksisterendeKategori = await db.select({
+        id: kategorier.id,
+        navn: kategorier.navn
+      })
+      .from(kategorier)
+      .where(eq(kategorier.navn, navn))
+      .limit(1);
+    
+    // # Hvis kategorien allerede findes, returner den eksisterende
+    if (eksisterendeKategori.length > 0) {
+      console.log(`Kategori '${navn}' findes allerede med ID: ${eksisterendeKategori[0].id}`);
+      return {
+        id: eksisterendeKategori[0].id,
+        navn: eksisterendeKategori[0].navn,
+        nyOprettet: false
+      };
+    }
+    
+    // # Opret ny kategori
+    console.log(`Opretter ny kategori: ${navn}`);
+    const nyKategori = await db.insert(kategorier)
+      .values({ navn })
+      .returning({ id: kategorier.id, navn: kategorier.navn });
+    
+    console.log(`Ny kategori oprettet med ID: ${nyKategori[0].id}`);
+    
+    return {
+      id: nyKategori[0].id,
+      navn: nyKategori[0].navn,
+      nyOprettet: true
+    };
+  } catch (error) {
+    console.error(`Fejl ved oprettelse af kategori '${navn}':`, error);
+    throw new Error(`Kunne ikke oprette kategori: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}

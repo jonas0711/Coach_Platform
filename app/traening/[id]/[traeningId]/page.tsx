@@ -65,7 +65,7 @@ export default async function TraeningDetaljerPage(props: { params: { id: string
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" asChild>
-            <Link href={`/traening/${holdId}`}>
+            <Link href={`/traening/faelles/${traeningId}`}>
               <ArrowLeftIcon className="h-4 w-4" />
             </Link>
           </Button>

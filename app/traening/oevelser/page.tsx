@@ -67,8 +67,8 @@ export default async function OevelserPage() {
               </div>
               
               <OevelseForm 
-                offensivePositioner={OFFENSIVE_POSITIONER}
-                defensivePositioner={DEFENSIVE_POSITIONER}
+                offensivePositioner={[...OFFENSIVE_POSITIONER]}
+                defensivePositioner={[...DEFENSIVE_POSITIONER]}
                 kategorier={kategorier.map(kat => kat.navn)}
                 fokuspunkter={fokuspunkter.map(fp => fp.tekst)}
               />

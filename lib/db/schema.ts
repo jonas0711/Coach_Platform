@@ -214,6 +214,59 @@ export const oevelseFokuspunkter = sqliteTable(
   }
 );
 
+// # Tabel for relationer mellem træninger og øvelser
+// # Bruges til at definere hvilke øvelser der indgår i en træning og i hvilken rækkefølge
+export const traeningOevelser = sqliteTable(
+  "traening_oevelser",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    traeningId: integer("traening_id")
+      .notNull()
+      .references(() => traeninger.id, { onDelete: "cascade" }), // # Reference til træning
+    oevelseId: integer("oevelse_id")
+      .notNull()
+      .references(() => oevelser.id, { onDelete: "cascade" }), // # Reference til øvelse
+    position: integer("position").notNull(), // # Position i rækkefølgen
+    tilfojetDato: integer("tilfojet_dato", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()), // # Dato for tilføjelse til træningen
+  }
+);
+
+// # Tabel for lokale ændringer til øvelser i en træning
+// # Indeholder lokale overrides for øvelsesdetaljer inden for en specifik træning
+export const traeningOevelseDetaljer = sqliteTable("traening_oevelse_detaljer", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  traeningOevelseId: integer("traening_oevelse_id")
+    .notNull()
+    .references(() => traeningOevelser.id, { onDelete: "cascade" }), // # Reference til træningsøvelse
+  navn: text("navn"), // # Lokalt navn for øvelsen (override)
+  beskrivelse: text("beskrivelse"), // # Lokal beskrivelse for øvelsen (override)
+  kategoriNavn: text("kategori_navn"), // # Lokalt kategorinavn for øvelsen (override)
+  sidstOpdateret: integer("sidst_opdateret", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Dato for sidste opdatering
+});
+
+// # Tabel for lokale fokuspunkter til øvelser i en træning
+// # Mange-til-mange relation mellem træningsøvelser og fokuspunkter
+export const traeningOevelseFokuspunkter = sqliteTable(
+  "traening_oevelse_fokuspunkter",
+  {
+    traeningOevelseId: integer("traening_oevelse_id")
+      .notNull()
+      .references(() => traeningOevelser.id, { onDelete: "cascade" }), // # Reference til træningsøvelse
+    fokuspunktId: integer("fokuspunkt_id")
+      .notNull()
+      .references(() => fokuspunkter.id, { onDelete: "cascade" }), // # Reference til fokuspunkt
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.traeningOevelseId, table.fokuspunktId] }), // # Primærnøgle er kombinationen af træningsøvelse-id og fokuspunkt-id
+    };
+  }
+);
+
 // # Konstanter for offensive positioner
 export const OFFENSIVE_POSITIONER = ["VF", "VB", "PM", "HB", "HF", "ST"] as const;
 export type OffensivPosition = typeof OFFENSIVE_POSITIONER[number];

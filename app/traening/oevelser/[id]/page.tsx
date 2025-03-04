@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { RedigerOevelseKnap } from "../_components/rediger-oevelse-knap";
 import { SletOevelseDialog } from "../_components/slet-oevelse-dialog";
 import { hentOevelse } from "@/lib/db/actions";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
 // Interface for position fra databasen
 interface DbPosition {
@@ -93,6 +95,15 @@ export default async function OevelseDetaljerPage({ params }: PageProps) {
     return (
       <div className="container py-6">
         <div className="max-w-4xl mx-auto">
+          <div className="mb-6">
+            <Button variant="outline" asChild className="mb-4">
+              <Link href="/traening/oevelser" className="flex items-center gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                <span>Tilbage til oversigt</span>
+              </Link>
+            </Button>
+          </div>
+          
           <div className="flex justify-between items-start mb-6">
             <div>
               <h1 className="text-2xl font-bold">{oevelse.navn}</h1>

@@ -1,7 +1,7 @@
 // Importerer nødvendige funktioner og komponenter
 import { redirect } from "next/navigation";
 import { OevelseRedigerForm } from "../../_components/oevelse-rediger-form";
-import { hentOevelse } from "@/lib/db/actions";
+import { hentOevelse, type OevelseData } from "@/lib/db/actions";
 
 // Definerer sidekonfiguration for at sikre dynamisk opdatering
 export const dynamic = "force-dynamic";
@@ -45,7 +45,10 @@ export default async function RedigerOevelsePage(props: {
             Opdater detaljer for øvelsen "{oevelse.navn}"
           </p>
         </div>
-        <OevelseRedigerForm oevelse={oevelse} />
+        <OevelseRedigerForm oevelse={oevelse as unknown as OevelseData & {
+          id: number;
+          kategori?: { id: number; navn: string; } | null;
+        }} />
       </div>
     );
   } catch (error) {

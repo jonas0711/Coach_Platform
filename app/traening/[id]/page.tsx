@@ -22,6 +22,8 @@ import { Toaster } from "sonner";
 
 // # Funktion der genererer metadata for siden (sidertitel)
 export async function generateMetadata({ params }: { params: { id: string } }) {
+  // # Først await params selv, før vi tilgår dets egenskaber
+  params = await params;
   const hold = await hentHold(parseInt(params.id));
   
   return {
@@ -31,6 +33,8 @@ export async function generateMetadata({ params }: { params: { id: string } }) {
 
 // # Hovedkomponent for visning af træninger for et hold
 export default async function HoldTraeningerPage({ params }: { params: { id: string } }) {
+  // # Først await params selv, før vi tilgår dets egenskaber
+  params = await params;
   // # Konverter id til et tal
   const holdId = parseInt(params.id);
   
@@ -108,7 +112,7 @@ export default async function HoldTraeningerPage({ params }: { params: { id: str
                     <span>Oprettet {format(new Date(traening.oprettetDato), "PPP", { locale: da })}</span>
                   </div>
                   <Button size="sm" variant="outline" asChild>
-                    <Link href={`/traening/${holdId}/${traening.id}`}>
+                    <Link href={`/traening/faelles/${traening.id}`}>
                       Detaljer
                     </Link>
                   </Button>

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { hentHold, hentSpillereTilHold } from "@/lib/db/actions";
+import { hentHold, hentSpillereTilHold, hentHoldMedNavn } from "@/lib/db/actions";
 import { OFFENSIVE_POSITIONER, DEFENSIVE_POSITIONER, OffensivPosition, DefensivPosition } from "@/lib/db/schema";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -28,23 +28,32 @@ export default async function HoldDetailPage({ params }: HoldPageProps) {
   // # I Next.js 15.2.0 skal params afventes før brug
   const resolvedParams = await params;
   const id = resolvedParams.id;
-  const holdId = parseInt(id);
   
-  // # Tjek om ID er gyldigt
-  if (isNaN(holdId)) {
-    return notFound();
+  // # Forsøg at finde hold på forskellige måder
+  let hold;
+  let holdId: number | undefined;
+  
+  // # Tjek først om ID er et nummer
+  if (!isNaN(parseInt(id))) {
+    holdId = parseInt(id);
+    hold = await hentHold(holdId);
+  } else {
+    // # Hvis ikke, forsøg at søge efter hold med navn
+    console.log(`Søger efter hold med navn: ${id}`);
+    hold = await hentHoldMedNavn(id);
+    holdId = hold?.id;
   }
-  
-  // # Hent holdet fra databasen
-  const hold = await hentHold(holdId);
   
   // # Hvis holdet ikke findes, vis 404
-  if (!hold) {
+  if (!hold || holdId === undefined) {
     return notFound();
   }
   
+  // # Nu er vi sikre på, at holdId er et tal
+  const numericHoldId: number = holdId;
+  
   // # Hent spillere for dette hold
-  const spillere = await hentSpillereTilHold(holdId);
+  const spillere = await hentSpillereTilHold(numericHoldId);
   const harSpillere = spillere.length > 0;
   
   return (
@@ -67,11 +76,11 @@ export default async function HoldDetailPage({ params }: HoldPageProps) {
         
         <div className="flex gap-2">
           {/* # Knapper til at administrere holdet */}
-          <RedigerHoldDialog holdId={holdId} holdNavn={hold.navn} />
-          <SletHoldDialog holdId={holdId} holdNavn={hold.navn} />
+          <RedigerHoldDialog holdId={numericHoldId} holdNavn={hold.navn} />
+          <SletHoldDialog holdId={numericHoldId} holdNavn={hold.navn} />
           
           {/* # Knap til at tilføje spillere */}
-          <OpretSpillerDialog holdId={holdId} />
+          <OpretSpillerDialog holdId={numericHoldId} />
         </div>
       </div>
       
@@ -99,7 +108,7 @@ export default async function HoldDetailPage({ params }: HoldPageProps) {
           <p className="text-muted-foreground mb-4">
             Du har ikke tilføjet nogen spillere til dette hold endnu.
           </p>
-          <OpretSpillerDialog holdId={holdId} buttonText="Tilføj din første spiller" variant="outline" />
+          <OpretSpillerDialog holdId={numericHoldId} buttonText="Tilføj din første spiller" variant="outline" />
         </div>
       )}
       

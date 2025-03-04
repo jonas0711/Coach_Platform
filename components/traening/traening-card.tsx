@@ -96,11 +96,7 @@ export default function TraeningCard({ traening }: { traening: TraeningMedHold }
       </CardContent>
       <CardFooter className="pt-1 flex flex-col gap-2">
         <Button asChild className="w-full">
-          <Link href={
-            traening.flereTilmeldte 
-              ? `/traening/faelles/${traening.id}` 
-              : `/hold/${traening.holdNavne[0]}/${traening.id}`
-          }>
+          <Link href={`/traening/faelles/${traening.id}`}>
             Administrer træning
           </Link>
         </Button>

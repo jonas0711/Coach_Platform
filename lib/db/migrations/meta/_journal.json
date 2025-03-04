@@ -7,6 +7,12 @@
       "when": "2024-03-03T21:32:00.000Z",
       "tag": "0001_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "when": "2024-07-02T12:00:00.000Z",
+      "tag": "0002_add_traening_oevelser",
+      "breakpoints": true
     }
   ]
 } 

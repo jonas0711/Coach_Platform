@@ -48,4 +48,5 @@ function getDb() {
 export const db = getDb();
 
 // # Eksporter databaseskemaet for nem adgang
-export * from "./schema"; 
+export * from "./schema";
+export * from "./actions"; 

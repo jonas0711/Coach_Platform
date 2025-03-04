@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Info, Trash2, Plus, X } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,7 +34,10 @@ import {
   hentAlleKategorier, 
   hentAllePositioner, 
   hentAlleFokuspunkter,
-  opdaterOevelse
+  opdaterOevelse,
+  type OevelseData,
+  type OevelsePosition,
+  type OevelseVariation
 } from "@/lib/db/actions";
 
 // Skema for validering af øvelsesformulardata
@@ -43,55 +46,67 @@ const formSkema = z.object({
   beskrivelse: z.string().optional(),
   billede: z.instanceof(FileList).optional(),
   brugerPositioner: z.boolean().default(false),
-  minimumDeltagere: z.coerce.number().min(1, { message: "Minimum 1 deltager" }),
+  minimumDeltagere: z.coerce.number().min(1, { message: "Minimum 1 deltager" }).optional(),
   kategori: z.string().optional(),
   nyKategori: z.string().optional(),
+  fokuspunkter: z.string().optional(),
+  originalPositionerNavn: z.string().optional(),
+  positioner: z.array(z.object({
+    position: z.string(),
+    antalKraevet: z.number(),
+    erOffensiv: z.boolean()
+  })).optional(),
+  variationer: z.array(z.object({
+    navn: z.string(),
+    beskrivelse: z.string().optional(),
+    positioner: z.array(z.object({
+      position: z.string(),
+      antalKraevet: z.number(),
+      erOffensiv: z.boolean()
+    }))
+  })).optional()
 });
 
 // Definerer typer til formulardata
 type FormData = z.infer<typeof formSkema>;
 
-// Typer til kategorier, positioner og fokuspunkter
+// Typer til kategorier og fokuspunkter
 interface Kategori {
   id: number;
   navn: string;
 }
 
-interface Position {
-  id: number;
+interface Fokuspunkt {
+  id: string;
   navn: string;
   beskrivelse?: string;
-  ikon?: string;
+}
+
+// Interface for position i UI
+interface UiPosition {
+  id: string;
+  navn: string;
+  beskrivelse: string;
   erOffensiv: boolean;
   antalKraevet: number;
 }
 
-interface Fokuspunkt {
-  id: number;
+// Interface for variation i UI
+interface UiVariation {
   navn: string;
   beskrivelse?: string;
-}
-
-// Interface for øvelsesdata
-interface Oevelse {
-  id: number;
-  navn: string;
-  beskrivelse?: string;
-  billedeSti?: string;
-  brugerPositioner: boolean;
-  minimumDeltagere: number;
-  kategoriId?: number;
-  kategori?: {
-    id: number;
-    navn: string;
-  };
-  positioner?: Position[];
-  fokuspunkter?: Fokuspunkt[];
+  positioner: UiPosition[];
 }
 
 // Props for redigeringsformularen
 interface OevelseRedigerFormProps {
-  oevelse: Oevelse;
+  oevelse: OevelseData & { 
+    id: number;
+    kategori?: { 
+      id: number;
+      navn: string;
+    } | null;
+  };
 }
 
 // Redigeringsformular-komponent
@@ -104,20 +119,41 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
   const [kategorier, setKategorier] = useState<Kategori[]>([]);
   const [alleFokuspunkter, setAlleFokuspunkter] = useState<Fokuspunkt[]>([]);
   const [valgteFokuspunkter, setValgteFokuspunkter] = useState<Fokuspunkt[]>(
-    oevelse.fokuspunkter?.map(f => ({
-      id: typeof f === 'string' ? -Math.floor(Math.random() * 10000) : f.id,
-      navn: typeof f === 'string' ? f : f.tekst
-    })) || []
+    Array.isArray(oevelse.fokuspunkter) 
+      ? oevelse.fokuspunkter.map(f => ({
+          id: f.id.toString(),
+          navn: f.tekst,
+          beskrivelse: undefined
+        }))
+      : oevelse.fokuspunkter?.split(',').map(f => ({
+          id: `existing_${f.trim()}`,
+          navn: f.trim(),
+          beskrivelse: undefined
+        })) || []
   );
   const [nytFokuspunkt, setNytFokuspunkt] = useState("");
-  const [allePositioner, setAllePositioner] = useState<Position[]>([]);
-  const [valgtePositioner, setValgtePositioner] = useState<Position[]>(
+  const [allePositioner, setAllePositioner] = useState<UiPosition[]>([]);
+  const [valgtePositioner, setValgtePositioner] = useState<UiPosition[]>(
     oevelse.positioner?.map(p => ({
-      id: `${p.erOffensiv ? 'off' : 'def'}_${p.position}`,
+      id: p.position,
       navn: p.position,
       beskrivelse: p.erOffensiv ? "Offensiv position" : "Defensiv position",
       erOffensiv: p.erOffensiv,
-      antalKraevet: p.antalKraevet || 1
+      antalKraevet: p.antalKraevet
+    })) || []
+  );
+  const [originalNavn, setOriginalNavn] = useState<string>("Original");
+  const [variationer, setVariationer] = useState<UiVariation[]>(
+    oevelse.variationer?.map((v, vIndex) => ({
+      navn: v.navn,
+      beskrivelse: v.beskrivelse,
+      positioner: v.positioner?.map(p => ({
+        id: p.position,
+        navn: p.position,
+        beskrivelse: p.erOffensiv ? "Offensiv position" : "Defensiv position",
+        erOffensiv: p.erOffensiv,
+        antalKraevet: p.antalKraevet
+      })) || []
     })) || []
   );
   const [loading, setLoading] = useState(false);
@@ -130,8 +166,9 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
       beskrivelse: oevelse.beskrivelse || "",
       brugerPositioner: oevelse.brugerPositioner || false,
       minimumDeltagere: oevelse.minimumDeltagere || 1,
-      kategori: oevelse.kategoriId?.toString() || "",
+      kategori: oevelse.kategori?.navn || "",
       nyKategori: "",
+      originalPositionerNavn: oevelse.originalPositionerNavn || "Original opsætning",
     },
   });
 
@@ -147,23 +184,35 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
         ]);
         
         setKategorier(kategoriData);
+        
         // Konverterer positioner til det korrekte format
-        const formatteredePositioner = [
+        const konverterdePositioner: UiPosition[] = [
           ...positionData.offensive.map((pos: string) => ({
-            id: `off_${pos}`,
+            id: pos,
             navn: pos,
             beskrivelse: "Offensiv position",
-            erOffensiv: true
+            erOffensiv: true,
+            antalKraevet: 0
           })),
           ...positionData.defensive.map((pos: string) => ({
-            id: `def_${pos}`,
+            id: pos,
             navn: pos,
             beskrivelse: "Defensiv position",
-            erOffensiv: false
+            erOffensiv: false,
+            antalKraevet: 0
           }))
         ];
-        setAllePositioner(formatteredePositioner);
-        setAlleFokuspunkter(fokuspunktData);
+        
+        setAllePositioner(konverterdePositioner);
+        
+        // Konverterer fokuspunkter til det korrekte format
+        const formatteredeFokuspunkter: Fokuspunkt[] = fokuspunktData.map((fp: any) => ({
+          id: fp.id.toString(),
+          navn: fp.navn,
+          beskrivelse: fp.beskrivelse
+        }));
+        
+        setAlleFokuspunkter(formatteredeFokuspunkter);
       } catch (error) {
         console.error("Fejl ved indlæsning af data:", error);
         toast({
@@ -179,7 +228,6 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
 
   // Håndterer tilføjelse af fokuspunkt
   const tilfoejFokuspunkt = (fokuspunkt: Fokuspunkt) => {
-    // Tjekker om fokuspunktet allerede er valgt
     const erAlleredeValgt = valgteFokuspunkter.some(f => f.id === fokuspunkt.id);
     if (!erAlleredeValgt) {
       setValgteFokuspunkter([...valgteFokuspunkter, fokuspunkt]);
@@ -189,10 +237,10 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
   // Håndterer oprettelse af nyt fokuspunkt
   const tilfoejNytFokuspunkt = () => {
     if (nytFokuspunkt.trim() !== "") {
-      // Opretter foreløbigt fokuspunkt med negativ ID for at markere at det er nyt
       const midlertidigFokuspunkt: Fokuspunkt = {
-        id: -Math.floor(Math.random() * 10000), // Tilfældig negativ ID for at markere at det skal oprettes
+        id: `new_${Math.random().toString(36).substr(2, 9)}`,
         navn: nytFokuspunkt.trim(),
+        beskrivelse: undefined
       };
       setValgteFokuspunkter([...valgteFokuspunkter, midlertidigFokuspunkt]);
       setNytFokuspunkt("");
@@ -200,126 +248,166 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
   };
 
   // Håndterer fjernelse af fokuspunkt
-  const fjernFokuspunkt = (id: number) => {
-    setValgteFokuspunkter(valgteFokuspunkter.filter(f => f.id !== id));
+  const fjernFokuspunkt = (fokuspunktId: string) => {
+    setValgteFokuspunkter(valgteFokuspunkter.filter(f => f.id !== fokuspunktId));
   };
 
   // Håndterer valg af position
-  const vaelgPosition = (position: Position) => {
-    // Tjekker om positionen allerede er valgt
-    const erAlleredeValgt = valgtePositioner.some(p => p.id === position.id);
+  const vaelgPosition = (position: UiPosition) => {
+    const erAlleredeValgt = valgtePositioner.some(p => p.navn === position.navn);
     if (!erAlleredeValgt) {
-      setValgtePositioner([...valgtePositioner, { ...position, antalKraevet: 1 }]);
+      const nyPosition = {
+        ...position,
+        id: position.navn,
+        antalKraevet: 1
+      };
+      setValgtePositioner([...valgtePositioner, nyPosition]);
     }
   };
 
   // Håndterer ændring af antal spillere for en position
   const opdaterAntalSpillere = (positionId: string, antal: number) => {
-    setValgtePositioner(prevPositioner => 
-      prevPositioner.map(pos => 
-        pos.id === positionId 
-          ? { ...pos, antalKraevet: Math.max(1, antal) }
-          : pos
-      )
-    );
+    const nyePositioner = [...valgtePositioner];
+    const positionIndex = nyePositioner.findIndex(p => p.navn === positionId);
+    
+    if (positionIndex !== -1) {
+      nyePositioner[positionIndex] = {
+        ...nyePositioner[positionIndex],
+        antalKraevet: antal
+      };
+      setValgtePositioner(nyePositioner);
+    }
   };
 
   // Håndterer fjernelse af position
-  const fjernPosition = (id: number) => {
-    setValgtePositioner(valgtePositioner.filter(p => p.id !== id));
+  const fjernPosition = (positionId: string) => {
+    setValgtePositioner(valgtePositioner.filter(p => p.navn !== positionId));
+  };
+
+  // Håndterer kategori valg
+  const handleKategoriValg = (kategori: string) => {
+    form.setValue("kategori", kategori);
+  };
+
+  // Håndterer tilføjelse af variation
+  const tilfoejVariation = () => {
+    setVariationer([...variationer, {
+      navn: "Ny variation",
+      beskrivelse: "",
+      positioner: []
+    }]);
+  };
+
+  // Håndterer opdatering af variations navn
+  const opdaterVariationNavn = (index: number, nytNavn: string) => {
+    const nyeVariationer = [...variationer];
+    nyeVariationer[index].navn = nytNavn;
+    setVariationer(nyeVariationer);
+  };
+
+  // Håndterer tilføjelse af position til variation
+  const tilfoejPositionTilVariation = (variationIndex: number, position: UiPosition) => {
+    const nyeVariationer = [...variationer];
+    const positionId = position.navn;
+    const erAlleredeValgt = nyeVariationer[variationIndex].positioner.some(p => p.navn === position.navn);
+    
+    if (!erAlleredeValgt) {
+      nyeVariationer[variationIndex].positioner.push({ 
+        ...position, 
+        id: positionId,
+        antalKraevet: 1 
+      });
+      setVariationer(nyeVariationer);
+    }
+  };
+
+  // Håndterer opdatering af antal spillere i variation
+  const opdaterVariationAntalSpillere = (variationIndex: number, positionId: string, antal: number) => {
+    const nyeVariationer = [...variationer];
+    // Opdater antallet for positionen, behold den selv hvis antal er 0
+    nyeVariationer[variationIndex].positioner = nyeVariationer[variationIndex].positioner.map((pos: UiPosition) =>
+      pos.navn === positionId ? { ...pos, antalKraevet: antal } : pos
+    );
+    setVariationer(nyeVariationer);
+  };
+
+  // Håndterer fjernelse af position fra variation
+  const fjernPositionFraVariation = (variationIndex: number, positionId: string) => {
+    const nyeVariationer = [...variationer];
+    nyeVariationer[variationIndex].positioner = nyeVariationer[variationIndex].positioner.filter(p => p.navn !== positionId);
+    setVariationer(nyeVariationer);
+  };
+
+  // Håndterer fjernelse af variation
+  const fjernVariation = (index: number) => {
+    setVariationer(variationer.filter((_, i) => i !== index));
   };
 
   // Håndterer formularindsendelse
   async function onSubmit(data: FormData) {
     try {
-      // Starter indlæsning
       setLoading(true);
       
-      // Viser indlæsningsmeddelelse
-      toast({
-        title: "Opdaterer øvelse...",
-        description: "Vent venligst, det kan tage et øjeblik.",
-      });
-      
-      // Finder start-tidspunkt for at måle varigheden
-      const startTid = new Date();
-      
-      // Forbereder positions-data
-      const positioner = valgtePositioner.map((pos) => ({
+      // Forbereder positions-data hvis brugerPositioner er true
+      const positioner = data.brugerPositioner ? valgtePositioner.map(pos => ({
         position: pos.navn,
         antalKraevet: pos.antalKraevet,
         erOffensiv: pos.erOffensiv
+      })) : undefined;
+      
+      // Forbereder variations-data og fjern prefixes fra ID'er
+      const variationsData = variationer.map(v => ({
+        navn: v.navn,
+        beskrivelse: v.beskrivelse || "",
+        positioner: v.positioner.map(p => ({
+          position: p.navn,
+          antalKraevet: p.antalKraevet,
+          erOffensiv: p.erOffensiv
+        }))
       }));
       
-      // Opdeler fokuspunkter i eksisterende og nye
-      const eksisterendeFokuspunkter = valgteFokuspunkter
-        .filter((punkt) => punkt.id > 0)
-        .map((punkt) => punkt.navn);
-      
-      const nyeFokuspunkter = valgteFokuspunkter
-        .filter((punkt) => punkt.id < 0)
-        .map((punkt) => punkt.navn);
-      
-      // Sammensætter alle fokuspunkter
-      const alleFokuspunkter = [...eksisterendeFokuspunkter, ...nyeFokuspunkter];
-      
-      // Forbereder øvelsesdata
-      const oevelseData = {
-        navn: data.navn,
-        beskrivelse: data.beskrivelse || "",
-        brugerPositioner: data.brugerPositioner,
-        minimumDeltagere: data.brugerPositioner ? undefined : data.minimumDeltagere,
-        positioner: data.brugerPositioner ? positioner : undefined,
-        kategori: data.nyKategori?.trim() || data.kategori || undefined,
-        fokuspunkter: alleFokuspunkter.join(',')
-      };
-      
-      // Sender opdateringsanmodning
-      await opdaterOevelse(oevelse.id, oevelseData);
-      
-      // Måler varigheden
-      const slutTid = new Date();
-      const varighed = (slutTid.getTime() - startTid.getTime()) / 1000;
-      
-      // Viser bekræftelsesbesked
-      toast({
-        title: "Øvelse opdateret!",
-        description: `Øvelsen blev opdateret på ${varighed.toFixed(1)} sekunder`,
+      // Sender opdateret data til serveren
+      await opdaterOevelse(oevelse.id, {
+        ...data,
+        positioner,
+        fokuspunkter: valgteFokuspunkter.map(fp => fp.navn).join(','),
+        variationer: variationsData,
+        originalPositionerNavn: data.originalPositionerNavn || "Original opsætning"
       });
       
-      // Omdirigerer til øvelseslisten
-      router.push("/traening/oevelser");
+      // Viser success besked
+      toast({
+        title: "Øvelse opdateret",
+        description: "Ændringerne er blevet gemt.",
+      });
+      
+      // Navigerer tilbage
+      router.push('/traening/oevelser');
       router.refresh();
     } catch (error) {
-      console.error("Fejl ved opdatering af øvelse:", error);
-      
-      // Viser fejlbesked
+      console.error("Fejl ved opdatering:", error);
       toast({
         title: "Fejl ved opdatering",
-        description: error instanceof Error ? error.message : "Der opstod en fejl. Prøv igen senere.",
+        description: error instanceof Error ? error.message : "Der skete en uventet fejl",
         variant: "destructive",
       });
     } finally {
-      // Afslutter indlæsning
       setLoading(false);
     }
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="space-y-6">
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          {/* Basisinformationsfelt */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Basisinformation</h2>
-            
-            {/* Navnefelt */}
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          {/* Basis information */}
+          <div className="grid gap-4 md:grid-cols-2">
             <FormField
               control={form.control}
               name="navn"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Navn på øvelse *</FormLabel>
+                  <FormLabel>Navn</FormLabel>
                   <FormControl>
                     <Input {...field} />
                   </FormControl>
@@ -328,226 +416,334 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
               )}
             />
             
-            {/* Beskrivelsesfelt */}
             <FormField
               control={form.control}
-              name="beskrivelse"
+              name="kategori"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Beskrivelse</FormLabel>
-                  <FormControl>
-                    <Textarea 
-                      {...field} 
-                      placeholder="Beskriv øvelsen..." 
-                      className="min-h-32"
-                    />
-                  </FormControl>
+                  <FormLabel>Kategori</FormLabel>
+                  <Select
+                    value={field.value}
+                    onValueChange={handleKategoriValg}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Vælg kategori" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {kategorier.map((kategori) => (
+                        <SelectItem key={kategori.id} value={kategori.navn}>
+                          {kategori.navn}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
             />
-            
-            {/* Billedefelt */}
+          </div>
+          
+          {/* Beskrivelse */}
+          <FormField
+            control={form.control}
+            name="beskrivelse"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Beskrivelse</FormLabel>
+                <FormControl>
+                  <Textarea {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          
+          {/* Positioner */}
+          <div className="space-y-4">
             <FormField
               control={form.control}
-              name="billede"
-              render={({ field: { value, onChange, ...fieldProps } }) => (
+              name="brugerPositioner"
+              render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Billede</FormLabel>
-                  <FormControl>
-                    <div className="flex flex-col gap-4">
-                      {oevelse.billedeSti && (
-                        <div className="rounded-md overflow-hidden w-full max-w-sm">
-                          <img 
-                            src={oevelse.billedeSti} 
-                            alt={oevelse.navn} 
-                            className="w-full h-auto object-cover"
-                          />
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Nuværende billede. Upload et nyt for at erstatte det.
-                          </p>
-                        </div>
-                      )}
-                      <Input 
-                        type="file" 
-                        accept="image/*"
-                        onChange={(e) => onChange(e.target.files)}
-                        {...fieldProps}
+                  <div className="flex items-center gap-2">
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
                       />
-                    </div>
-                  </FormControl>
+                    </FormControl>
+                    <FormLabel className="!mt-0">Brug positioner</FormLabel>
+                  </div>
                   <FormDescription>
-                    Valgfrit: Upload et billede for øvelsen (anbefalet str.: 800x600px)
+                    Vælg om øvelsen skal bruge specifikke positioner eller bare et minimum antal spillere
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
-          </div>
-          
-          {/* Kategoriindstillinger */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Kategori</h2>
-            <div className="grid gap-4">
-              <FormField
-                control={form.control}
-                name="kategori"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Vælg kategori</FormLabel>
-                    <Select 
-                      value={field.value} 
-                      onValueChange={field.onChange}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Vælg en kategori" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="ingen">Ingen kategori</SelectItem>
-                        {kategorier.map((kategori) => (
-                          <SelectItem key={kategori.id} value={kategori.id.toString()}>
-                            {kategori.navn}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="nyKategori"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Eller opret ny kategori</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="Skriv ny kategori navn" />
-                    </FormControl>
-                    <FormDescription>
-                      Hvis du vælger en eksisterende kategori, vil denne blive ignoreret
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </div>
-          
-          {/* Indstillinger for deltagere */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Indstillinger for deltagere</h2>
-            
-            <FormField
-              control={form.control}
-              name="brugerPositioner"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">
-                      Positionsbaseret øvelse
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon" className="ml-1 h-5 w-5">
-                            <Info className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Vælg denne hvis øvelsen kræver bestemte positioner (f.eks. angribere, målmand)
-                        </TooltipContent>
-                      </Tooltip>
-                    </FormLabel>
-                    <FormDescription>
-                      Aktivér dette hvis øvelsen kræver specifikke positioner
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={(checked) => {
-                        field.onChange(checked);
-                        if (!checked) {
-                          setValgtePositioner([]);
-                        }
-                      }}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
             
             {form.watch("brugerPositioner") ? (
-              <div className="space-y-4 rounded-lg border p-4">
-                <h3 className="text-sm font-medium">Vælg positioner og antal spillere</h3>
-                
-                {valgtePositioner.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {valgtePositioner.map((position) => (
-                      <div key={position.id} className="flex items-center gap-2 bg-secondary p-2 rounded-lg">
-                        <Badge variant="secondary" className="flex items-center gap-1">
-                          {position.navn}
-                        </Badge>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => opdaterAntalSpillere(position.id, position.antalKraevet - 1)}
-                          >
-                            -
-                          </Button>
-                          <span className="min-w-[2rem] text-center">{position.antalKraevet}</span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => opdaterAntalSpillere(position.id, position.antalKraevet + 1)}
-                          >
-                            +
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-6 w-6 ml-1 hover:bg-destructive/20 rounded-full"
-                            onClick={() => fjernPosition(position.id)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
+              <div className="space-y-8">
+                {/* Original opsætning */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <FormField
+                      control={form.control}
+                      name="originalPositionerNavn"
+                      render={({ field }) => (
+                        <FormItem className="flex-1 max-w-xs">
+                          <FormLabel>Navn på original opsætning</FormLabel>
+                          <FormControl>
+                            <Input {...field} placeholder="F.eks. Højre side" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Offensive positioner */}
+                    <div className="space-y-2">
+                      <h4 className="font-medium">Offensive positioner</h4>
+                      <div className="space-y-2">
+                        {allePositioner
+                          .filter(p => p.erOffensiv)
+                          .map((position) => (
+                            <div key={position.id} className="flex items-center justify-between p-3 border rounded-lg">
+                              <div className="font-medium">{position.navn}</div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => {
+                                    const pos = valgtePositioner.find(p => p.navn === position.navn);
+                                    if (pos) {
+                                      opdaterAntalSpillere(position.navn, Math.max(0, pos.antalKraevet - 1));
+                                    }
+                                  }}
+                                >
+                                  -
+                                </Button>
+                                <span className="w-8 text-center">
+                                  {valgtePositioner.find(p => p.navn === position.navn)?.antalKraevet || 0}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => {
+                                    const pos = valgtePositioner.find(p => p.navn === position.navn);
+                                    if (pos) {
+                                      opdaterAntalSpillere(position.navn, pos.antalKraevet + 1);
+                                    } else {
+                                      vaelgPosition({ ...position, antalKraevet: 1 });
+                                    }
+                                  }}
+                                >
+                                  +
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                    
+                    {/* Defensive positioner */}
+                    <div className="space-y-2">
+                      <h4 className="font-medium">Defensive positioner</h4>
+                      <div className="space-y-2">
+                        {allePositioner
+                          .filter(p => !p.erOffensiv)
+                          .map((position) => (
+                            <div key={position.id} className="flex items-center justify-between p-3 border rounded-lg">
+                              <div className="font-medium">{position.navn}</div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => {
+                                    const pos = valgtePositioner.find(p => p.navn === position.navn);
+                                    if (pos) {
+                                      opdaterAntalSpillere(position.navn, Math.max(0, pos.antalKraevet - 1));
+                                    }
+                                  }}
+                                >
+                                  -
+                                </Button>
+                                <span className="w-8 text-center">
+                                  {valgtePositioner.find(p => p.navn === position.navn)?.antalKraevet || 0}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => {
+                                    const pos = valgtePositioner.find(p => p.navn === position.navn);
+                                    if (pos) {
+                                      opdaterAntalSpillere(position.navn, pos.antalKraevet + 1);
+                                    } else {
+                                      vaelgPosition({ ...position, antalKraevet: 1 });
+                                    }
+                                  }}
+                                >
+                                  +
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Variationer */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">Variationer</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={tilfoejVariation}
+                    >
+                      Tilføj variation
+                    </Button>
+                  </div>
+
+                  {variationer.map((variation, index) => (
+                    <div key={index} className="space-y-4 border rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <Input
+                          value={variation.navn}
+                          onChange={(e) => opdaterVariationNavn(index, e.target.value)}
+                          placeholder="Variationens navn"
+                          className="max-w-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => fjernVariation(index)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      <Textarea
+                        value={variation.beskrivelse}
+                        onChange={(e) => {
+                          const nyeVariationer = [...variationer];
+                          nyeVariationer[index].beskrivelse = e.target.value;
+                          setVariationer(nyeVariationer);
+                        }}
+                        placeholder="Beskrivelse af variationen"
+                        className="min-h-[100px]"
+                      />
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Offensive positioner */}
+                        <div className="space-y-2">
+                          <h4 className="font-medium">Offensive positioner</h4>
+                          <div className="space-y-2">
+                            {allePositioner
+                              .filter(p => p.erOffensiv)
+                              .map((position) => (
+                                <div key={position.id} className="flex items-center justify-between p-3 border rounded-lg">
+                                  <div className="font-medium">{position.navn}</div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => {
+                                        const pos = variation.positioner.find(p => p.navn === position.navn);
+                                        if (pos) {
+                                          opdaterVariationAntalSpillere(index, position.navn, Math.max(0, pos.antalKraevet - 1));
+                                        }
+                                      }}
+                                    >
+                                      -
+                                    </Button>
+                                    <span className="w-8 text-center">
+                                      {variation.positioner.find(p => p.navn === position.navn)?.antalKraevet || 0}
+                                    </span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => {
+                                        const pos = variation.positioner.find(p => p.navn === position.navn);
+                                        if (pos) {
+                                          opdaterVariationAntalSpillere(index, position.navn, pos.antalKraevet + 1);
+                                        } else {
+                                          tilfoejPositionTilVariation(index, { ...position, antalKraevet: 1 });
+                                        }
+                                      }}
+                                    >
+                                      +
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+
+                        {/* Defensive positioner */}
+                        <div className="space-y-2">
+                          <h4 className="font-medium">Defensive positioner</h4>
+                          <div className="space-y-2">
+                            {allePositioner
+                              .filter(p => !p.erOffensiv)
+                              .map((position) => (
+                                <div key={position.id} className="flex items-center justify-between p-3 border rounded-lg">
+                                  <div className="font-medium">{position.navn}</div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => {
+                                        const pos = variation.positioner.find(p => p.navn === position.navn);
+                                        if (pos) {
+                                          opdaterVariationAntalSpillere(index, position.navn, Math.max(0, pos.antalKraevet - 1));
+                                        }
+                                      }}
+                                    >
+                                      -
+                                    </Button>
+                                    <span className="w-8 text-center">
+                                      {variation.positioner.find(p => p.navn === position.navn)?.antalKraevet || 0}
+                                    </span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => {
+                                        const pos = variation.positioner.find(p => p.navn === position.navn);
+                                        if (pos) {
+                                          opdaterVariationAntalSpillere(index, position.navn, pos.antalKraevet + 1);
+                                        } else {
+                                          tilfoejPositionTilVariation(index, { ...position, antalKraevet: 1 });
+                                        }
+                                      }}
+                                    >
+                                      +
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {allePositioner
-                    .filter(pos => !valgtePositioner.some(v => v.id === pos.id))
-                    .map((position) => (
-                      <Button
-                        key={position.id}
-                        type="button"
-                        variant="outline"
-                        className="justify-start"
-                        onClick={() => vaelgPosition(position)}
-                      >
-                        {position.ikon && (
-                          <span className="mr-2">{position.ikon}</span>
-                        )}
-                        {position.navn}
-                      </Button>
-                    ))}
+                    </div>
+                  ))}
                 </div>
-                
-                {valgtePositioner.length === 0 && (
-                  <p className="text-sm text-muted-foreground mt-2">
-                    Vælg mindst en position for øvelsen
-                  </p>
-                )}
               </div>
             ) : (
               <FormField
@@ -559,9 +755,6 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
                     <FormControl>
                       <Input type="number" min={1} {...field} />
                     </FormControl>
-                    <FormDescription>
-                      Angiv det mindste antal spillere, der kræves for at udføre øvelsen
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -569,98 +762,24 @@ export function OevelseRedigerForm({ oevelse }: OevelseRedigerFormProps) {
             )}
           </div>
           
-          {/* Fokusupdukter */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Fokuspunkter</h2>
-            
-            <Tabs defaultValue="eksisterende">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="eksisterende">Eksisterende fokuspunkter</TabsTrigger>
-                <TabsTrigger value="nyt">Tilføj nyt fokuspunkt</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="eksisterende" className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  {alleFokuspunkter
-                    .filter(punkt => !valgteFokuspunkter.some(v => v.id === punkt.id))
-                    .map((fokuspunkt) => (
-                      <Button
-                        key={fokuspunkt.id}
-                        type="button"
-                        variant="outline"
-                        className="justify-start"
-                        onClick={() => tilfoejFokuspunkt(fokuspunkt)}
-                      >
-                        {fokuspunkt.tekst}
-                      </Button>
-                    ))}
-                </div>
-                {alleFokuspunkter.length === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    Ingen eksisterende fokuspunkter. Opret et nyt.
-                  </p>
-                )}
-              </TabsContent>
-              
-              <TabsContent value="nyt">
-                <div className="flex space-x-2">
-                  <Input
-                    value={nytFokuspunkt}
-                    onChange={(e) => setNytFokuspunkt(e.target.value)}
-                    placeholder="Skriv nyt fokuspunkt..."
-                  />
-                  <Button 
-                    type="button" 
-                    onClick={tilfoejNytFokuspunkt}
-                    disabled={nytFokuspunkt.trim() === ""}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Tilføj
-                  </Button>
-                </div>
-              </TabsContent>
-            </Tabs>
-            
-            {valgteFokuspunkter.length > 0 && (
-              <div className="mt-4">
-                <h3 className="text-sm font-medium mb-2">Valgte fokuspunkter:</h3>
-                <div className="flex flex-wrap gap-2">
-                  {valgteFokuspunkter.map((fokuspunkt) => (
-                    <Badge 
-                      key={fokuspunkt.id} 
-                      variant="secondary" 
-                      className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground"
-                    >
-                      {fokuspunkt.navn}
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-4 w-4 ml-1 hover:bg-destructive/20 rounded-full p-0"
-                        onClick={() => fjernFokuspunkt(fokuspunkt.id)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          
-          <Separator />
-          
-          {/* Indsendelsesknapper */}
-          <div className="flex justify-between">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => router.back()}
-              disabled={loading}
-            >
-              Annuller
-            </Button>
+          {/* Submit knapper */}
+          <div className="flex gap-4">
             <Button type="submit" disabled={loading}>
-              {loading ? "Opdaterer..." : "Gem ændringer"}
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Opdaterer...
+                </>
+              ) : (
+                "Gem ændringer"
+              )}
+            </Button>
+            <Button 
+              type="button" 
+              variant="outline"
+              onClick={() => router.push('/traening/oevelser')}
+            >
+              Fortryd
             </Button>
           </div>
         </form>

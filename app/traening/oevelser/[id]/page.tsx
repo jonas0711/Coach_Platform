@@ -7,19 +7,48 @@ import { RedigerOevelseKnap } from "../_components/rediger-oevelse-knap";
 import { SletOevelseDialog } from "../_components/slet-oevelse-dialog";
 import { hentOevelse } from "@/lib/db/actions";
 
-// Interface for position
-interface Position {
+// Interface for position fra databasen
+interface DbPosition {
   oevelseId: number;
   position: string;
   antalKraevet: number;
   erOffensiv: boolean;
+  variationId: number | null;
 }
 
-// Interface for fokuspunkt
-interface Fokuspunkt {
+// Interface for fokuspunkt fra databasen
+interface DbFokuspunkt {
   id: number;
   tekst: string;
+}
+
+// Interface for variation fra databasen
+interface DbVariation {
+  id: number;
+  navn: string;
+  beskrivelse?: string;
+}
+
+// Interface for kategori fra databasen
+interface DbKategori {
+  id: number;
+  navn: string;
   oprettetDato: Date;
+}
+
+// Interface for øvelse fra databasen
+interface DbOevelse {
+  id: number;
+  navn: string;
+  beskrivelse?: string;
+  billedeSti?: string;
+  brugerPositioner: boolean;
+  minimumDeltagere?: number;
+  originalPositionerNavn?: string;
+  kategori: DbKategori | null;
+  positioner: DbPosition[];
+  variationer: DbVariation[];
+  fokuspunkter: DbFokuspunkt[];
 }
 
 // Sikrer dynamisk opdatering af siden
@@ -34,8 +63,9 @@ interface PageProps {
 
 // Hovedkomponent for øvelsesdetaljer
 export default async function OevelseDetaljerPage({ params }: PageProps) {
-  // Destrukturer id direkte fra params
-  const { id } = params;
+  // Await params før vi bruger dens properties
+  const resolvedParams = await params;
+  const { id } = resolvedParams;
 
   // Valider ID
   if (!id) {
@@ -52,7 +82,7 @@ export default async function OevelseDetaljerPage({ params }: PageProps) {
 
   try {
     // Henter øvelsesdata fra databasen
-    const oevelse = await hentOevelse(oevelseId);
+    const oevelse = await hentOevelse(oevelseId) as DbOevelse;
     
     // Hvis øvelsen ikke findes, omdirigerer til øvelsessiden
     if (!oevelse) {
@@ -119,18 +149,52 @@ export default async function OevelseDetaljerPage({ params }: PageProps) {
               <CardContent>
                 {oevelse.brugerPositioner ? (
                   <div className="space-y-4">
-                    <h3 className="font-medium">Krævede positioner:</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {oevelse.positioner && oevelse.positioner.length > 0 ? (
-                        oevelse.positioner.map((position: Position) => (
-                          <Badge key={`${position.oevelseId}-${position.position}`} variant="secondary">
-                            {position.position} ({position.antalKraevet})
-                          </Badge>
-                        ))
-                      ) : (
-                        <p className="text-muted-foreground">Ingen positioner specificeret</p>
-                      )}
+                    {/* Hovedpositioner */}
+                    <div>
+                      <h3 className="font-medium mb-2">
+                        {oevelse.originalPositionerNavn || "Hovedpositioner"}:
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {oevelse.positioner && oevelse.positioner.length > 0 ? (
+                          oevelse.positioner
+                            .filter((position) => !position.variationId)
+                            .map((position) => (
+                              <Badge key={`${position.oevelseId}-${position.position}`} variant="secondary">
+                                {position.position} ({position.antalKraevet})
+                              </Badge>
+                            ))
+                        ) : (
+                          <p className="text-muted-foreground">Ingen hovedpositioner specificeret</p>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Variationer */}
+                    {oevelse.variationer && oevelse.variationer.length > 0 && (
+                      <div>
+                        <h3 className="font-medium mb-2">Variationer:</h3>
+                        <div className="space-y-4">
+                          {oevelse.variationer.map((variation) => (
+                            <div key={variation.id} className="border rounded-lg p-4">
+                              <h4 className="font-medium mb-2">{variation.navn}</h4>
+                              {variation.beskrivelse && (
+                                <p className="text-sm text-muted-foreground mb-2">{variation.beskrivelse}</p>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                {oevelse.positioner
+                                  .filter((position) => position.variationId === variation.id)
+                                  .map((position) => (
+                                    <Badge key={`${position.oevelseId}-${position.variationId}-${position.position}`} variant="outline">
+                                      {position.position} ({position.antalKraevet})
+                                    </Badge>
+                                  ))
+                                }
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p>Minimum {oevelse.minimumDeltagere} deltager(e)</p>
@@ -146,7 +210,7 @@ export default async function OevelseDetaljerPage({ params }: PageProps) {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    {oevelse.fokuspunkter.map((punkt: Fokuspunkt) => (
+                    {oevelse.fokuspunkter.map((punkt) => (
                       <Badge key={punkt.id} variant="outline">
                         {punkt.tekst}
                       </Badge>

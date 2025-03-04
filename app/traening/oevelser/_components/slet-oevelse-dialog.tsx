@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
+import { useRouter } from "next/navigation";
 
 // Props der kræves for at slette en øvelse
 interface SletOevelseDialogProps {
@@ -29,6 +30,8 @@ export function SletOevelseDialog({ oevelseId, oevelseNavn }: SletOevelseDialogP
   const [isLoading, setIsLoading] = useState(false);
   // Hook til at vise toast-beskeder
   const { toast } = useToast();
+  // Router til navigation
+  const router = useRouter();
 
   // Håndterer sletning af en øvelse
   async function handleSlet() {
@@ -53,6 +56,10 @@ export function SletOevelseDialog({ oevelseId, oevelseNavn }: SletOevelseDialogP
         title: "Øvelsen er slettet",
         description: "Øvelsen blev slettet med succes.",
       });
+
+      // Naviger tilbage til øvelsesoversigten
+      router.push('/traening/oevelser');
+      router.refresh();
     } catch (error) {
       // Håndterer fejl hvis sletningen mislykkes
       console.error("Fejl ved sletning af øvelse:", error);

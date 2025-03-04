@@ -152,6 +152,21 @@ export const oevelser = sqliteTable("oevelser", {
   brugerPositioner: integer("bruger_positioner", { mode: "boolean" }).notNull().default(false), // # Flag der indikerer om øvelsen bruger positioner
   minimumDeltagere: integer("minimum_deltagere"), // # Minimum antal deltagere hvis positioner ikke bruges
   kategoriId: integer("kategori_id").references(() => kategorier.id), // # Reference til kategori (optional)
+  originalPositionerNavn: text("original_positioner_navn"), // # Navn for de originale positioner
+  oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
+});
+
+// # Tabel for øvelsesvariationer
+// # Indeholder information om forskellige variationer af samme øvelse
+export const oevelseVariationer = sqliteTable("oevelse_variationer", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  oevelseId: integer("oevelse_id")
+    .notNull()
+    .references(() => oevelser.id, { onDelete: "cascade" }), // # Reference til hovedøvelsen
+  navn: text("navn").notNull(), // # Variationens navn (f.eks. "Venstre side" eller "Højre side")
+  beskrivelse: text("beskrivelse"), // # Valgfri beskrivelse af variationen
   oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse
@@ -165,13 +180,15 @@ export const oevelsePositioner = sqliteTable(
     oevelseId: integer("oevelse_id")
       .notNull()
       .references(() => oevelser.id, { onDelete: "cascade" }), // # Reference til øvelse
+    variationId: integer("variation_id")
+      .references(() => oevelseVariationer.id, { onDelete: "cascade" }), // # Reference til variation (optional)
     position: text("position").notNull(), // # Positionens navn
     antalKraevet: integer("antal_kraevet").notNull().default(0), // # Antal påkrævede spillere i denne position
     erOffensiv: integer("er_offensiv", { mode: "boolean" }).notNull().default(true), // # Om det er en offensiv position
   },
   (table) => {
     return {
-      pk: primaryKey({ columns: [table.oevelseId, table.position] }), // # Primærnøgle er kombinationen af øvelses-id og position
+      pk: primaryKey({ columns: [table.oevelseId, table.variationId, table.position] }), // # Primærnøgle er kombinationen af øvelses-id, variations-id og position
     };
   }
 );

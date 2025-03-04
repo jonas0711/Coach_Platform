@@ -36,6 +36,7 @@ import {
   ChevronsUpDown,
   Check,
   Loader2,
+  Trash2,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { Position as PositionEnum } from "@/lib/db/schema";
@@ -77,20 +78,36 @@ const KATEGORIER = [
 
 // Valideringsschema for øvelsesformularen
 const formSchema = z.object({
-  navn: z.string().min(2, { message: "Navn skal være mindst 2 tegn" }).max(50),
-  beskrivelse: z.string().min(10, { message: "Beskrivelse skal være mindst 10 tegn" }).max(500),
-  billede: z.instanceof(File).optional(),
+  navn: z.string().min(3, { message: "Navn skal være mindst 3 tegn" }).max(50),
+  beskrivelse: z.string().optional(),
+  billede: z.instanceof(FileList).optional(),
   kategori: z.string().optional(),
   fokuspunkter: z.string().optional(),
-  // Valg mellem positioner eller minimum antal deltagere
   brugerPositioner: z.enum(['true', 'false']),
   minimumDeltagere: z.coerce.number().min(1).optional(),
   antalOffensivePositioner: z.number().min(0).max(5),
   antalDefensivePositioner: z.number().min(0).max(5),
+  originalPositionerNavn: z.string().optional(),
 });
 
 // Form værdier type baseret på validerings-skemaet
 type FormValues = z.infer<typeof formSchema>;
+
+// Interface for position
+interface Position {
+  id: string;
+  navn: string;
+  beskrivelse: string;
+  erOffensiv: boolean;
+  antalKraevet: number;
+}
+
+// Interface for variation
+interface Variation {
+  navn: string;
+  beskrivelse?: string;
+  positioner: Position[];
+}
 
 // Props interface til OevelseForm komponenten
 export interface OevelseFormProps {
@@ -112,17 +129,24 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
   const [lokaleFokuspunkter, setLokaleFokuspunkter] = useState<string[]>(fokuspunkter);
   
   // Tilstand til at holde styr på positioner
-  const [offensivePositionerState, setOffensivePositionerState] = useState<PositionEnum[]>(offensivePositioner.map(position => ({
-    position,
-    antalKraevet: 0,
+  const [offensivePositionerState, setOffensivePositionerState] = useState<Position[]>(offensivePositioner.map(position => ({
+    id: `off_${position}`,
+    navn: position,
+    beskrivelse: "Offensiv position",
     erOffensiv: true,
+    antalKraevet: 0,
   })));
   
-  const [defensivePositionerState, setDefensivePositionerState] = useState<PositionEnum[]>(defensivePositioner.map(position => ({
-    position,
-    antalKraevet: 0,
+  const [defensivePositionerState, setDefensivePositionerState] = useState<Position[]>(defensivePositioner.map(position => ({
+    id: `def_${position}`,
+    navn: position,
+    beskrivelse: "Defensiv position",
     erOffensiv: false,
+    antalKraevet: 0,
   })));
+  
+  // Tilstand til at holde styr på variationer
+  const [variationer, setVariationer] = useState<Variation[]>([]);
   
   // Tilstand til at holde styr på billedet
   const [billede, setBillede] = useState<File | null>(null);
@@ -134,6 +158,42 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
   
   // Tilstand til at tracke valgte fokuspunkter for at undgå duplikater
   const [valgteFokuspunkter, setValgteFokuspunkter] = useState<Set<string>>(new Set());
+  
+  // Funktion til at tilføje en ny variation
+  const tilfoejVariation = () => {
+    setVariationer([...variationer, {
+      navn: `Variation ${variationer.length + 1}`,
+      beskrivelse: "",
+      positioner: []
+    }]);
+  };
+  
+  // Funktion til at opdatere en variation
+  const opdaterVariation = (index: number, variation: Variation) => {
+    const nyeVariationer = [...variationer];
+    nyeVariationer[index] = variation;
+    setVariationer(nyeVariationer);
+  };
+  
+  // Funktion til at fjerne en variation
+  const fjernVariation = (index: number) => {
+    setVariationer(variationer.filter((_, i) => i !== index));
+  };
+  
+  // Funktion til at tilføje en position til en variation
+  const tilfoejPositionTilVariation = (variationIndex: number, position: Position) => {
+    const nyeVariationer = [...variationer];
+    nyeVariationer[variationIndex].positioner.push(position);
+    setVariationer(nyeVariationer);
+  };
+  
+  // Funktion til at fjerne en position fra en variation
+  const fjernPositionFraVariation = (variationIndex: number, positionId: string) => {
+    const nyeVariationer = [...variationer];
+    nyeVariationer[variationIndex].positioner = nyeVariationer[variationIndex].positioner
+      .filter(p => p.id !== positionId);
+    setVariationer(nyeVariationer);
+  };
   
   // Opsætning af formularen med validering
   const form = useForm<FormValues>({
@@ -147,6 +207,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
       minimumDeltagere: 1,
       antalOffensivePositioner: 0,
       antalDefensivePositioner: 0,
+      originalPositionerNavn: '',
     },
   });
   
@@ -199,14 +260,14 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
   const handleIncrement = (position: string, erOffensiv: boolean) => {
     if (erOffensiv) {
       setOffensivePositionerState(positions => 
-        positions.map(p => p.position === position 
+        positions.map(p => p.navn === position 
           ? { ...p, antalKraevet: p.antalKraevet + 1 } 
           : p
         )
       );
     } else {
       setDefensivePositionerState(positions => 
-        positions.map(p => p.position === position 
+        positions.map(p => p.navn === position 
           ? { ...p, antalKraevet: p.antalKraevet + 1 } 
           : p
         )
@@ -218,14 +279,14 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
   const handleDecrement = (position: string, erOffensiv: boolean) => {
     if (erOffensiv) {
       setOffensivePositionerState(positions => 
-        positions.map(p => p.position === position 
+        positions.map(p => p.navn === position 
           ? { ...p, antalKraevet: Math.max(0, p.antalKraevet - 1) } 
           : p
         )
       );
     } else {
       setDefensivePositionerState(positions => 
-        positions.map(p => p.position === position 
+        positions.map(p => p.navn === position 
           ? { ...p, antalKraevet: Math.max(0, p.antalKraevet - 1) } 
           : p
         )
@@ -368,7 +429,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
       }
       
       // # Forbered positioner hvis de bruges
-      let positioner: PositionEnum[] = [];
+      let positioner: Position[] = [];
       
       if (values.brugerPositioner === 'true') {
         positioner = [
@@ -395,6 +456,27 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
         billedeSti = "/images/oevelser/placeholder.jpg";
       }
       
+      // # Forbered positions-data
+      const positionerData = [
+        ...offensivePositionerState.filter(p => p.antalKraevet > 0),
+        ...defensivePositionerState.filter(p => p.antalKraevet > 0)
+      ].map(pos => ({
+        position: pos.navn,
+        antalKraevet: pos.antalKraevet,
+        erOffensiv: pos.erOffensiv
+      }));
+      
+      // # Forbered variations-data
+      const variationsData = variationer.map(v => ({
+        navn: v.navn,
+        beskrivelse: v.beskrivelse,
+        positioner: v.positioner.map(p => ({
+          position: p.navn,
+          antalKraevet: p.antalKraevet,
+          erOffensiv: p.erOffensiv
+        }))
+      }));
+      
       // # Opret øvelsen
       console.log("Sender data til databasen...");
       await opretOevelse({
@@ -403,9 +485,11 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
         billedeSti,
         brugerPositioner: values.brugerPositioner === 'true',
         minimumDeltagere: values.brugerPositioner === 'false' ? values.minimumDeltagere : undefined,
-        positioner: values.brugerPositioner === 'true' ? positioner : undefined,
+        positioner: values.brugerPositioner === 'true' ? positionerData : undefined,
         kategori: values.kategori,
         fokuspunkter: values.fokuspunkter,
+        variationer: variationsData,
+        originalPositionerNavn: values.brugerPositioner === 'true' ? values.originalPositionerNavn : undefined,
       });
       
       // # Mål tiden det tog at oprette øvelsen
@@ -419,20 +503,27 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
         description: `Øvelsen er blevet tilføjet til dit bibliotek på ${tidBrugt} sekunder.`
       });
       
-      // # Nulstil formen
+      // # Nulstil formen og states
       form.reset();
       setBillede(null);
       setFokuspunkterState(['']);
       setOffensivePositionerState(offensivePositioner.map(position => ({
-        position,
-        antalKraevet: 0,
+        id: `off_${position}`,
+        navn: position,
+        beskrivelse: "Offensiv position",
         erOffensiv: true,
+        antalKraevet: 0,
       })));
       setDefensivePositionerState(defensivePositioner.map(position => ({
-        position,
-        antalKraevet: 0,
+        id: `def_${position}`,
+        navn: position,
+        beskrivelse: "Defensiv position",
         erOffensiv: false,
+        antalKraevet: 0,
       })));
+      
+      // # Nulstil erIndsendt før navigation
+      setErIndsendt(false);
       
       // # Naviger tilbage til oversigten
       router.push('/traening/oevelser');
@@ -447,6 +538,13 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
       setErIndsendt(false);
     }
   };
+  
+  // Tilføj cleanup når komponenten unmountes
+  useEffect(() => {
+    return () => {
+      setErIndsendt(false);
+    };
+  }, []);
   
   return (
     <Card className="w-full">
@@ -724,23 +822,41 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
               />
             ) : (
               <div className="space-y-6">
+                {/* Navn på original positioner */}
+                <FormField
+                  control={form.control}
+                  name="originalPositionerNavn"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Navn på original positioner</FormLabel>
+                      <FormControl>
+                        <Input placeholder="F.eks. 'Standard opstilling' eller 'Basis formation'" {...field} />
+                      </FormControl>
+                      <FormDescription>
+                        Giv et navn til den originale positions-opstilling, så den kan skelnes fra variationer
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 {/* Offensive positioner */}
                 <div className="space-y-3">
                   <Label>Offensive positioner</Label>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {offensivePositionerState.map((position) => (
                       <div 
-                        key={position.position} 
+                        key={position.id} 
                         className="flex items-center justify-between p-3 border rounded-md"
                       >
-                        <div className="font-medium">{position.position}</div>
+                        <div className="font-medium">{position.navn}</div>
                         <div className="flex items-center gap-1">
                           <Button 
                             type="button" 
                             variant="outline" 
                             size="icon" 
                             className="h-7 w-7"
-                            onClick={() => handleDecrement(position.position, true)}
+                            onClick={() => handleDecrement(position.navn, true)}
                           >
                             <Minus className="h-3 w-3" />
                           </Button>
@@ -750,7 +866,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
                             variant="outline" 
                             size="icon" 
                             className="h-7 w-7"
-                            onClick={() => handleIncrement(position.position, true)}
+                            onClick={() => handleIncrement(position.navn, true)}
                           >
                             <Plus className="h-3 w-3" />
                           </Button>
@@ -766,17 +882,17 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {defensivePositionerState.map((position) => (
                       <div 
-                        key={position.position} 
+                        key={position.id} 
                         className="flex items-center justify-between p-3 border rounded-md"
                       >
-                        <div className="font-medium">{position.position}</div>
+                        <div className="font-medium">{position.navn}</div>
                         <div className="flex items-center gap-1">
                           <Button 
                             type="button" 
                             variant="outline" 
                             size="icon" 
                             className="h-7 w-7"
-                            onClick={() => handleDecrement(position.position, false)}
+                            onClick={() => handleDecrement(position.navn, false)}
                           >
                             <Minus className="h-3 w-3" />
                           </Button>
@@ -786,7 +902,7 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
                             variant="outline" 
                             size="icon" 
                             className="h-7 w-7"
-                            onClick={() => handleIncrement(position.position, false)}
+                            onClick={() => handleIncrement(position.navn, false)}
                           >
                             <Plus className="h-3 w-3" />
                           </Button>
@@ -798,16 +914,181 @@ export function OevelseForm({ offensivePositioner, defensivePositioner, kategori
               </div>
             )}
             
+            {/* Variationer sektion */}
+            {watchBrugerPositioner && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Variationer</h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={tilfoejVariation}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Tilføj variation
+                  </Button>
+                </div>
+                
+                {variationer.map((variation, index) => (
+                  <Card key={index} className="p-4">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Input
+                          value={variation.navn}
+                          onChange={(e) => opdaterVariation(index, { ...variation, navn: e.target.value })}
+                          placeholder="Variationens navn"
+                          className="max-w-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => fjernVariation(index)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                      
+                      <Textarea
+                        value={variation.beskrivelse}
+                        onChange={(e) => opdaterVariation(index, { ...variation, beskrivelse: e.target.value })}
+                        placeholder="Beskrivelse af variationen"
+                      />
+
+                      {/* Offensive positioner */}
+                      <div className="space-y-4">
+                        <h4 className="font-medium">Offensive positioner</h4>
+                        <div className="grid grid-cols-3 gap-3">
+                          {offensivePositionerState.map((position) => (
+                            <div 
+                              key={position.id} 
+                              className="flex flex-col items-center p-3 border rounded-md space-y-2"
+                            >
+                              <div className="font-medium">{position.navn}</div>
+                              <div className="flex items-center gap-2">
+                                <Button 
+                                  type="button" 
+                                  variant="outline" 
+                                  size="icon" 
+                                  className="h-8 w-8"
+                                  onClick={() => {
+                                    const pos = variation.positioner.find(p => p.id === position.id);
+                                    if (pos) {
+                                      const nyAntal = Math.max(0, pos.antalKraevet - 1);
+                                      const nyePositioner = variation.positioner.map(p =>
+                                        p.id === position.id ? { ...p, antalKraevet: nyAntal } : p
+                                      );
+                                      opdaterVariation(index, { ...variation, positioner: nyePositioner });
+                                    }
+                                  }}
+                                >
+                                  -
+                                </Button>
+                                <span className="w-8 text-center">
+                                  {variation.positioner.find(p => p.id === position.id)?.antalKraevet || 0}
+                                </span>
+                                <Button 
+                                  type="button" 
+                                  variant="outline" 
+                                  size="icon" 
+                                  className="h-8 w-8"
+                                  onClick={() => {
+                                    const pos = variation.positioner.find(p => p.id === position.id);
+                                    if (pos) {
+                                      const nyePositioner = variation.positioner.map(p =>
+                                        p.id === position.id ? { ...p, antalKraevet: pos.antalKraevet + 1 } : p
+                                      );
+                                      opdaterVariation(index, { ...variation, positioner: nyePositioner });
+                                    } else {
+                                      tilfoejPositionTilVariation(index, { ...position, antalKraevet: 1 });
+                                    }
+                                  }}
+                                >
+                                  +
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Defensive positioner */}
+                      <div className="space-y-4">
+                        <h4 className="font-medium">Defensive positioner</h4>
+                        <div className="grid grid-cols-3 gap-3">
+                          {defensivePositionerState.map((position) => (
+                            <div 
+                              key={position.id} 
+                              className="flex flex-col items-center p-3 border rounded-md space-y-2"
+                            >
+                              <div className="font-medium">{position.navn}</div>
+                              <div className="flex items-center gap-2">
+                                <Button 
+                                  type="button" 
+                                  variant="outline" 
+                                  size="icon" 
+                                  className="h-8 w-8"
+                                  onClick={() => {
+                                    const pos = variation.positioner.find(p => p.id === position.id);
+                                    if (pos) {
+                                      const nyAntal = Math.max(0, pos.antalKraevet - 1);
+                                      const nyePositioner = variation.positioner.map(p =>
+                                        p.id === position.id ? { ...p, antalKraevet: nyAntal } : p
+                                      );
+                                      opdaterVariation(index, { ...variation, positioner: nyePositioner });
+                                    }
+                                  }}
+                                >
+                                  -
+                                </Button>
+                                <span className="w-8 text-center">
+                                  {variation.positioner.find(p => p.id === position.id)?.antalKraevet || 0}
+                                </span>
+                                <Button 
+                                  type="button" 
+                                  variant="outline" 
+                                  size="icon" 
+                                  className="h-8 w-8"
+                                  onClick={() => {
+                                    const pos = variation.positioner.find(p => p.id === position.id);
+                                    if (pos) {
+                                      const nyePositioner = variation.positioner.map(p =>
+                                        p.id === position.id ? { ...p, antalKraevet: pos.antalKraevet + 1 } : p
+                                      );
+                                      opdaterVariation(index, { ...variation, positioner: nyePositioner });
+                                    } else {
+                                      tilfoejPositionTilVariation(index, { ...position, antalKraevet: 1 });
+                                    }
+                                  }}
+                                >
+                                  +
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+            
             {/* Submit knap */}
-            <Button type="submit" disabled={erIndsendt} className="w-full md:w-auto">
+            <Button 
+              type="submit" 
+              disabled={erIndsendt}
+              className="w-full"
+            >
               {erIndsendt ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Opretter øvelse... Dette kan tage et øjeblik
+                  Opretter øvelse...
                 </>
               ) : (
                 <>
-                  <CheckCircle className="mr-2 h-4 w-4" />
+                  <Check className="mr-2 h-4 w-4" />
                   Opret øvelse
                 </>
               )}

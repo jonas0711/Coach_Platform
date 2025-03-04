@@ -1,7 +1,7 @@
 "use server";
 
-import { db, hold, spillere, offensivePositioner, defensivePositioner, traeninger, traeningHold, traeningDeltager, oevelser, oevelsePositioner, kategorier, fokuspunkter, oevelseFokuspunkter } from "./index";
-import { eq, and, inArray } from "drizzle-orm";
+import { db, hold, spillere, offensivePositioner, defensivePositioner, traeninger, traeningHold, traeningDeltager, oevelser, oevelsePositioner, kategorier, fokuspunkter, oevelseFokuspunkter, oevelseVariationer } from "./index";
+import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { 
@@ -34,6 +34,17 @@ export interface TraeningData {
   holdIds?: number[]; // # Array af holdIds, hvis træningen har flere tilknyttede hold
 }
 
+// # Interface for øvelses variation
+export interface OevelseVariation {
+  navn: string;
+  beskrivelse?: string;
+  positioner: {
+    position: string;
+    antalKraevet: number;
+    erOffensiv: boolean;
+  }[];
+}
+
 // # Interface for øvelses data
 export interface OevelseData {
   navn: string;
@@ -46,6 +57,8 @@ export interface OevelseData {
     antalKraevet: number;
     erOffensiv: boolean;
   }[];
+  originalPositionerNavn?: string; // # Navn for de originale positioner
+  variationer?: OevelseVariation[]; // # Liste af variationer for øvelsen
   kategori?: string; // # Kategoriens navn
   fokuspunkter?: string; // # Kommasepareret liste af fokuspunkter
 }
@@ -826,8 +839,8 @@ export async function opretOevelse(oevelseData: OevelseData) {
   }
 
   // # Tjek om øvelsen bruger positioner eller minimumDeltagere
-  if (oevelseData.brugerPositioner && (!oevelseData.positioner || oevelseData.positioner.length === 0)) {
-    throw new Error("Øvelsen skal have positioner, når 'brugerPositioner' er true");
+  if (oevelseData.brugerPositioner && (!oevelseData.positioner || oevelseData.positioner.length === 0) && (!oevelseData.variationer || oevelseData.variationer.length === 0)) {
+    throw new Error("Øvelsen skal have enten positioner eller variationer, når 'brugerPositioner' er true");
   }
 
   if (!oevelseData.brugerPositioner && !oevelseData.minimumDeltagere) {
@@ -859,7 +872,6 @@ export async function opretOevelse(oevelseData: OevelseData) {
         console.log(`Opretter ny kategori: ${oevelseData.kategori}`);
         const nyKategori = await db.insert(kategorier).values({
           navn: oevelseData.kategori,
-          // # Brug et Date-objekt til oprettelses-datoen (automatisk håndteret af databasen)
         }).returning({ id: kategorier.id });
         
         kategoriId = nyKategori[0].id;
@@ -875,7 +887,8 @@ export async function opretOevelse(oevelseData: OevelseData) {
       navn: oevelseData.navn,
       brugerPositioner: oevelseData.brugerPositioner,
       minimumDeltagere: oevelseData.minimumDeltagere,
-      kategoriId: kategoriId
+      kategoriId: kategoriId,
+      originalPositionerNavn: oevelseData.originalPositionerNavn
     };
     
     // # Sæt beskrivelse kun hvis den findes og ikke er tom
@@ -891,29 +904,66 @@ export async function opretOevelse(oevelseData: OevelseData) {
     // # Indsæt øvelse i databasen
     const result = await db.insert(oevelser).values(oevelseDataToDB).returning({ id: oevelser.id });
     
-    const oevelseId = result[0].id;
+    if (result.length === 0) {
+      throw new Error("Kunne ikke oprette øvelse");
+    }
     
-    // # OPTIMERING: Håndter positioner i batch hvis de findes
-    if (oevelseData.brugerPositioner && oevelseData.positioner) {
-      console.log(`Tilføjer ${oevelseData.positioner.length} positioner til øvelsen`);
-      
-      // # Forbered alle positioner til batch indsættelse
-      const positionerMedKrav = oevelseData.positioner.filter(p => p.antalKraevet > 0);
-      
-      if (positionerMedKrav.length > 0) {
+    const oevelseId = result[0].id;
+    console.log(`Øvelse oprettet med ID: ${oevelseId}`);
+    
+    // # Hvis øvelsen bruger positioner, opret dem
+    if (oevelseData.brugerPositioner) {
+      // # Håndter hovedpositioner hvis de findes
+      if (oevelseData.positioner && oevelseData.positioner.length > 0) {
+        console.log(`Tilføjer ${oevelseData.positioner.length} hovedpositioner til øvelsen`);
+        
         // # Indsæt alle positioner i en enkelt forespørgsel
         await db.insert(oevelsePositioner).values(
-          positionerMedKrav.map(position => ({
+          oevelseData.positioner.filter(p => p.antalKraevet > 0).map(position => ({
             oevelseId,
+            variationId: null, // # Hovedpositioner har ingen variation
             position: position.position,
             antalKraevet: position.antalKraevet,
             erOffensiv: position.erOffensiv,
           }))
         );
       }
+      
+      // # Håndter variationer hvis de findes
+      if (oevelseData.variationer && oevelseData.variationer.length > 0) {
+        console.log(`Tilføjer ${oevelseData.variationer.length} variationer til øvelsen`);
+        
+        for (const variation of oevelseData.variationer) {
+          // # Opret variation
+          const variationResult = await db.insert(oevelseVariationer).values({
+            oevelseId,
+            navn: variation.navn,
+            beskrivelse: variation.beskrivelse,
+          }).returning({ id: oevelseVariationer.id });
+          
+          if (variationResult.length === 0) {
+            throw new Error(`Kunne ikke oprette variation: ${variation.navn}`);
+          }
+          
+          const variationId = variationResult[0].id;
+          
+          // # Opret positioner for variationen
+          if (variation.positioner && variation.positioner.length > 0) {
+            await db.insert(oevelsePositioner).values(
+              variation.positioner.filter(p => p.antalKraevet > 0).map(position => ({
+                oevelseId,
+                variationId,
+                position: position.position,
+                antalKraevet: position.antalKraevet,
+                erOffensiv: position.erOffensiv,
+              }))
+            );
+          }
+        }
+      }
     }
     
-    // # OPTIMERING: Håndter fokuspunkter mere effektivt
+    // # Håndter fokuspunkter hvis de er angivet
     if (oevelseData.fokuspunkter && oevelseData.fokuspunkter.trim() !== "") {
       // # Split fokuspunkterne ved linjeskift eller komma
       const fokuspunktListe = oevelseData.fokuspunkter.split(/[\n,]/).map(fp => fp.trim()).filter(fp => fp !== "");
@@ -939,33 +989,31 @@ export async function opretOevelse(oevelseData: OevelseData) {
           tekst => !eksisterendeFokuspunkterMap.has(tekst)
         );
         
-        // # 3. Opret nye fokuspunkter i en batch hvis der er nogen
-        let nyeFokuspunkterIds: number[] = [];
+        // # 3. Opret nye fokuspunkter
         if (nyeFokuspunkterTekst.length > 0) {
           console.log(`Opretter ${nyeFokuspunkterTekst.length} nye fokuspunkter`);
+          
           const nyeFokuspunkter = await db.insert(fokuspunkter)
             .values(nyeFokuspunkterTekst.map(tekst => ({ tekst })))
-              .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
+            .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
             
-          // # Opdater map med de nye fokuspunkter
-          nyeFokuspunkter.forEach(fp => {
-            eksisterendeFokuspunkterMap.set(fp.tekst, fp.id);
-          });
+            // # Tilføj nye fokuspunkter til map
+            for (const fp of nyeFokuspunkter) {
+              eksisterendeFokuspunkterMap.set(fp.tekst, fp.id);
+            }
+          }
           
-          nyeFokuspunkterIds = nyeFokuspunkter.map(fp => fp.id);
-        }
-        
-        // # 4. Indsæt alle relationer på én gang
-        const relationer = fokuspunktListe.map(tekst => ({
-          oevelseId,
-          fokuspunktId: eksisterendeFokuspunkterMap.get(tekst)!
-        }));
-        
-        if (relationer.length > 0) {
-          await db.insert(oevelseFokuspunkter).values(relationer);
+          // # 4. Indsæt alle relationer på én gang
+          const relationer = fokuspunktListe.map(tekst => ({
+            oevelseId,
+            fokuspunktId: eksisterendeFokuspunkterMap.get(tekst)!
+          }));
+          
+          if (relationer.length > 0) {
+            await db.insert(oevelseFokuspunkter).values(relationer);
+          }
         }
       }
-    }
     
     // # Revalidér stien så siden opdateres
     revalidatePath("/traening");
@@ -1022,10 +1070,32 @@ export async function hentOevelse(oevelseId: number) {
 
     const oevelseData = oevelse[0];
 
-    // # Henter positioner for øvelsen hvis den bruger positioner
+    // # Henter alle positioner for øvelsen
     const positionerListe = oevelseData.brugerPositioner 
-      ? await db.select().from(oevelsePositioner).where(eq(oevelsePositioner.oevelseId, oevelseId))
+      ? await db.select().from(oevelsePositioner)
+          .where(eq(oevelsePositioner.oevelseId, oevelseId))
       : [];
+    
+    // # Henter variationer og deres positioner
+    const variationer = await db.select().from(oevelseVariationer)
+      .where(eq(oevelseVariationer.oevelseId, oevelseId));
+    
+    // # For hver variation, hent dens positioner
+    const variationerMedPositioner = await Promise.all(
+      variationer.map(async (variation) => {
+        const variationPositioner = await db.select()
+          .from(oevelsePositioner)
+          .where(and(
+            eq(oevelsePositioner.oevelseId, oevelseId),
+            eq(oevelsePositioner.variationId, variation.id)
+          ));
+        
+        return {
+          ...variation,
+          positioner: variationPositioner
+        };
+      })
+    );
     
     // # Henter kategori information hvis den har en kategori
     let kategoriData = null;
@@ -1035,25 +1105,27 @@ export async function hentOevelse(oevelseId: number) {
         kategoriData = kategoriResult[0];
       }
     }
-    
-    // # Henter fokuspunkter for øvelsen
-    const fokusListe = await db.select().from(oevelseFokuspunkter).where(eq(oevelseFokuspunkter.oevelseId, oevelseId));
-    
-    // # Henter detaljeret information om fokuspunkterne
-    const fokuspunktData = await db.select()
-      .from(fokuspunkter)
-      .where(fokusListe.length > 0 ? inArray(fokuspunkter.id, fokusListe.map(f => f.fokuspunktId)) : eq(fokuspunkter.id, -1));
-    
-    // # Returnerer øvelsen med alle relaterede data
+
+    // # Henter fokuspunkter
+    const fokuspunkterResult = await db.select({
+      id: fokuspunkter.id,
+      tekst: fokuspunkter.tekst
+    })
+    .from(oevelseFokuspunkter)
+    .innerJoin(fokuspunkter, eq(oevelseFokuspunkter.fokuspunktId, fokuspunkter.id))
+    .where(eq(oevelseFokuspunkter.oevelseId, oevelseId));
+
+    // # Returnerer den samlede øvelsesdata
     return {
       ...oevelseData,
-      positioner: positionerListe,
       kategori: kategoriData,
-      fokuspunkter: fokuspunktData
+      positioner: positionerListe,
+      variationer: variationerMedPositioner,
+      fokuspunkter: fokuspunkterResult
     };
   } catch (error) {
-    console.error("Fejl ved hentning af øvelse:", error);
-    throw new Error("Der opstod en fejl ved hentning af øvelsesdetaljer");
+    console.error('Fejl ved hentning af øvelse:', error);
+    throw error;
   }
 }
 
@@ -1128,8 +1200,8 @@ export async function opdaterOevelse(oevelseId: number, oevelseData: OevelseData
   }
 
   // # Tjek om øvelsen bruger positioner eller minimumDeltagere
-  if (oevelseData.brugerPositioner && (!oevelseData.positioner || oevelseData.positioner.length === 0)) {
-    throw new Error("Øvelsen skal have positioner, når 'brugerPositioner' er true");
+  if (oevelseData.brugerPositioner && (!oevelseData.positioner || oevelseData.positioner.length === 0) && (!oevelseData.variationer || oevelseData.variationer.length === 0)) {
+    throw new Error("Øvelsen skal have enten positioner eller variationer, når 'brugerPositioner' er true");
   }
 
   if (!oevelseData.brugerPositioner && !oevelseData.minimumDeltagere) {
@@ -1172,7 +1244,8 @@ export async function opdaterOevelse(oevelseId: number, oevelseData: OevelseData
       navn: oevelseData.navn,
       brugerPositioner: oevelseData.brugerPositioner,
       minimumDeltagere: oevelseData.minimumDeltagere,
-      kategoriId: kategoriId
+      kategoriId: kategoriId,
+      originalPositionerNavn: oevelseData.originalPositionerNavn
     };
     
     // # Sæt beskrivelse kun hvis den findes og ikke er tom
@@ -1196,29 +1269,154 @@ export async function opdaterOevelse(oevelseId: number, oevelseData: OevelseData
     if (result.length === 0) {
       throw new Error(`Øvelse med ID ${oevelseId} findes ikke`);
     }
-    
-    // # Hvis øvelsen bruger positioner, slet gamle og indsæt nye
-    if (oevelseData.brugerPositioner && oevelseData.positioner) {
-      // # Slet alle eksisterende positioner først
-      await db.delete(oevelsePositioner)
-        .where(eq(oevelsePositioner.oevelseId, oevelseId));
+
+    try {
+      // # Hvis øvelsen bruger positioner, håndter dem
+      if (oevelseData.brugerPositioner) {
+        // # Hent alle eksisterende positioner for øvelsen (uden variationer)
+        const eksisterendePositioner = await db.select().from(oevelsePositioner)
+          .where(and(
+            eq(oevelsePositioner.oevelseId, oevelseId),
+            isNull(oevelsePositioner.variationId)
+          ));
+
+        // # Find positioner der skal opdateres eller tilføjes
+        const positionerAtOpdatere = oevelseData.positioner?.filter(p => p.antalKraevet > 0) || [];
         
-      // # Forbered alle positioner til batch indsættelse
-      const positionerMedKrav = oevelseData.positioner.filter(p => p.antalKraevet > 0);
-      
-      if (positionerMedKrav.length > 0) {
-        console.log(`Tilføjer ${positionerMedKrav.length} positioner til øvelsen`);
-        
-        // # Indsæt alle positioner i en enkelt forespørgsel
-        await db.insert(oevelsePositioner).values(
-          positionerMedKrav.map(position => ({
-            oevelseId,
-            position: position.position,
-            antalKraevet: position.antalKraevet,
-            erOffensiv: position.erOffensiv,
-          }))
+        // # Find positioner der skal slettes (de som ikke længere er i brug)
+        const positionerAtSlette = eksisterendePositioner.filter(ep => 
+          !positionerAtOpdatere.some(p => p.position === ep.position)
         );
+
+        // # Slet ubrugte positioner
+        if (positionerAtSlette.length > 0) {
+          await db.delete(oevelsePositioner)
+            .where(and(
+              eq(oevelsePositioner.oevelseId, oevelseId),
+              isNull(oevelsePositioner.variationId),
+              inArray(oevelsePositioner.position, positionerAtSlette.map(p => p.position))
+            ));
+        }
+
+        // # Opdater eller tilføj positioner
+        for (const position of positionerAtOpdatere) {
+          const eksisterendePosition = eksisterendePositioner.find(ep => 
+            ep.position === position.position
+          );
+
+          if (eksisterendePosition) {
+            // # Opdater eksisterende position
+            await db.update(oevelsePositioner)
+              .set({ 
+                antalKraevet: position.antalKraevet,
+                erOffensiv: position.erOffensiv 
+              })
+              .where(and(
+                eq(oevelsePositioner.oevelseId, oevelseId),
+                isNull(oevelsePositioner.variationId),
+                eq(oevelsePositioner.position, position.position)
+              ));
+          } else {
+            // # Opret ny position
+            await db.insert(oevelsePositioner).values({
+              oevelseId,
+              variationId: null,
+              position: position.position,
+              antalKraevet: position.antalKraevet,
+              erOffensiv: position.erOffensiv,
+            });
+          }
+        }
+
+        // # Håndter variationer på samme måde
+        if (oevelseData.variationer && oevelseData.variationer.length > 0) {
+          for (const variation of oevelseData.variationer) {
+            let variationId: number;
+
+            // # Find eller opret variation
+            const eksisterendeVariation = await db.select().from(oevelseVariationer)
+              .where(and(
+                eq(oevelseVariationer.oevelseId, oevelseId),
+                eq(oevelseVariationer.navn, variation.navn)
+              )).limit(1);
+
+            if (eksisterendeVariation.length > 0) {
+              variationId = eksisterendeVariation[0].id;
+              // # Opdater variation hvis nødvendigt
+              if (eksisterendeVariation[0].beskrivelse !== variation.beskrivelse) {
+                await db.update(oevelseVariationer)
+                  .set({ beskrivelse: variation.beskrivelse })
+                  .where(eq(oevelseVariationer.id, variationId));
+              }
+            } else {
+              const nyVariation = await db.insert(oevelseVariationer).values({
+                oevelseId,
+                navn: variation.navn,
+                beskrivelse: variation.beskrivelse,
+              }).returning({ id: oevelseVariationer.id });
+              variationId = nyVariation[0].id;
+            }
+
+            // # Hent eksisterende positioner for denne variation
+            const eksisterendeVariationPositioner = await db.select().from(oevelsePositioner)
+              .where(and(
+                eq(oevelsePositioner.oevelseId, oevelseId),
+                eq(oevelsePositioner.variationId, variationId)
+              ));
+
+            // # Find positioner der skal opdateres eller tilføjes
+            const variationPositionerAtOpdatere = variation.positioner.filter(p => p.antalKraevet > 0);
+
+            // # Find positioner der skal slettes
+            const variationPositionerAtSlette = eksisterendeVariationPositioner.filter(ep => 
+              !variationPositionerAtOpdatere.some(p => p.position === ep.position)
+            );
+
+            // # Slet ubrugte positioner
+            if (variationPositionerAtSlette.length > 0) {
+              await db.delete(oevelsePositioner)
+                .where(and(
+                  eq(oevelsePositioner.oevelseId, oevelseId),
+                  eq(oevelsePositioner.variationId, variationId),
+                  inArray(oevelsePositioner.position, variationPositionerAtSlette.map(p => p.position))
+                ));
+            }
+
+            // # Opdater eller tilføj positioner
+            for (const position of variationPositionerAtOpdatere) {
+              const eksisterendePosition = eksisterendeVariationPositioner.find(ep => 
+                ep.position === position.position
+              );
+
+              if (eksisterendePosition) {
+                // # Opdater eksisterende position
+                await db.update(oevelsePositioner)
+                  .set({ 
+                    antalKraevet: position.antalKraevet,
+                    erOffensiv: position.erOffensiv 
+                  })
+                  .where(and(
+                    eq(oevelsePositioner.oevelseId, oevelseId),
+                    eq(oevelsePositioner.variationId, variationId),
+                    eq(oevelsePositioner.position, position.position)
+                  ));
+              } else {
+                // # Opret ny position
+                await db.insert(oevelsePositioner).values({
+                  oevelseId,
+                  variationId,
+                  position: position.position,
+                  antalKraevet: position.antalKraevet,
+                  erOffensiv: position.erOffensiv,
+                });
+              }
+            }
+          }
+        }
       }
+    } catch (error) {
+      console.error(`Fejl ved håndtering af positioner for øvelse ${oevelseId}:`, error);
+      throw error;
     }
     
     // # Håndter fokuspunkter, hvis de er angivet
@@ -1258,7 +1456,7 @@ export async function opdaterOevelse(oevelseId: number, oevelseData: OevelseData
             console.log(`Opretter ${nyeFokuspunkterTekst.length} nye fokuspunkter ved opdatering`);
             const nyeFokuspunkter = await db.insert(fokuspunkter)
               .values(nyeFokuspunkterTekst.map(tekst => ({ tekst })))
-                .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
+              .returning({ id: fokuspunkter.id, tekst: fokuspunkter.tekst });
               
             // # Opdater map med de nye fokuspunkter
             nyeFokuspunkter.forEach(fp => {

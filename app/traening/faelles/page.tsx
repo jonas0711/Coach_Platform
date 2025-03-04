@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { da } from "date-fns/locale";
-import { Plus, Calendar, Clock, Trophy, Users } from "lucide-react";
+import { Plus, Calendar, Clock, Trophy, Users, ArrowLeft } from "lucide-react";
 import { db } from "@/lib/db";
 import { traeninger, traeningHold, hold } from "@/lib/db/schema";
 import { eq, desc, count, inArray } from "drizzle-orm";
@@ -100,7 +100,15 @@ export default async function FaellesTraeningerPage() {
   return (
     <div className="container py-8 space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Fælles Træninger</h1>
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/traening">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Tilbage
+            </Link>
+          </Button>
+          <h1 className="text-3xl font-bold">Fælles Træninger</h1>
+        </div>
         <OpretFaellesTraeningButton />
       </div>
 

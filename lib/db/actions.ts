@@ -16,6 +16,8 @@ export interface SpillerData {
   navn: string;
   nummer?: number;
   erMV: boolean;
+  offensivRating?: number; // # Rating for offensive evner (1-10)
+  defensivRating?: number; // # Rating for defensive evner (1-10)
   offensivePositioner: {
     position: OffensivPosition;
     erPrimaer: boolean;
@@ -140,26 +142,38 @@ export async function opretSpiller(holdId: number, spillerData: SpillerData) {
     throw new Error("Spillernavn må ikke være tomt");
   }
 
-  // # Validér at målvogtere ikke har positioner
+  // # Validér ratings hvis spilleren ikke er målvogter
+  if (!spillerData.erMV) {
+    if (spillerData.offensivRating !== undefined) {
+      if (spillerData.offensivRating < 1 || spillerData.offensivRating > 10) {
+        throw new Error("Offensiv rating skal være mellem 1 og 10");
+      }
+    }
+    if (spillerData.defensivRating !== undefined) {
+      if (spillerData.defensivRating < 1 || spillerData.defensivRating > 10) {
+        throw new Error("Defensiv rating skal være mellem 1 og 10");
+      }
+    }
+  }
+
+  // # Validér at målvogtere ikke har positioner eller ratings
   if (spillerData.erMV) {
-    // # Hvis spilleren er målvogter, skal de ikke have positioner
+    // # Hvis spilleren er målvogter, skal de ikke have positioner eller ratings
     spillerData.offensivePositioner = [];
     spillerData.defensivePositioner = [];
+    spillerData.offensivRating = undefined;
+    spillerData.defensivRating = undefined;
   } else {
     // # Validér offensive positioner (skal have præcis én primær)
-    if (!spillerData.erMV) {
-      const primærOffensiv = spillerData.offensivePositioner.filter(p => p.erPrimaer);
-      if (primærOffensiv.length !== 1) {
-        throw new Error("Spilleren skal have præcis én primær offensiv position");
-      }
+    const primærOffensiv = spillerData.offensivePositioner.filter(p => p.erPrimaer);
+    if (primærOffensiv.length !== 1) {
+      throw new Error("Spilleren skal have præcis én primær offensiv position");
     }
 
     // # Validér defensive positioner (skal have 1-2 primære)
-    if (!spillerData.erMV) {
-      const primærDefensiv = spillerData.defensivePositioner.filter(p => p.erPrimaer);
-      if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
-        throw new Error("Spilleren skal have 1-2 primære defensive positioner");
-      }
+    const primærDefensiv = spillerData.defensivePositioner.filter(p => p.erPrimaer);
+    if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
+      throw new Error("Spilleren skal have 1-2 primære defensive positioner");
     }
   }
 
@@ -173,6 +187,8 @@ export async function opretSpiller(holdId: number, spillerData: SpillerData) {
       navn: spillerData.navn,
       nummer: spillerData.nummer,
       erMV: spillerData.erMV,
+      offensivRating: spillerData.erMV ? undefined : spillerData.offensivRating,
+      defensivRating: spillerData.erMV ? undefined : spillerData.defensivRating,
     });
     
     // # Få id for sidst indsatte spiller ved at søge efter navn og holdId
@@ -396,46 +412,63 @@ export async function opdaterSpiller(spillerId: number, spillerData: SpillerData
     throw new Error("Spillernavn må ikke være tomt");
   }
 
-  // # Hent spilleren først for at få holdId til sti-revalidering
-  const eksisterendeSpiller = await db.select().from(spillere).where(eq(spillere.id, spillerId));
-  if (eksisterendeSpiller.length === 0) {
-    throw new Error("Spilleren findes ikke");
-  }
-  const holdId = eksisterendeSpiller[0].holdId;
-
-  // # Validér at målvogtere ikke har positioner
-  if (spillerData.erMV) {
-    // # Hvis spilleren er målvogter, skal de ikke have positioner
-    spillerData.offensivePositioner = [];
-    spillerData.defensivePositioner = [];
-  } else {
-    // # Validér offensive positioner (skal have præcis én primær)
-    if (!spillerData.erMV) {
-      const primærOffensiv = spillerData.offensivePositioner.filter(p => p.erPrimaer);
-      if (primærOffensiv.length !== 1) {
-        throw new Error("Spilleren skal have præcis én primær offensiv position");
+  // # Validér ratings hvis spilleren ikke er målvogter
+  if (!spillerData.erMV) {
+    if (spillerData.offensivRating !== undefined) {
+      if (spillerData.offensivRating < 1 || spillerData.offensivRating > 10) {
+        throw new Error("Offensiv rating skal være mellem 1 og 10");
       }
     }
-
-    // # Validér defensive positioner (skal have 1-2 primære)
-    if (!spillerData.erMV) {
-      const primærDefensiv = spillerData.defensivePositioner.filter(p => p.erPrimaer);
-      if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
-        throw new Error("Spilleren skal have 1-2 primære defensive positioner");
+    if (spillerData.defensivRating !== undefined) {
+      if (spillerData.defensivRating < 1 || spillerData.defensivRating > 10) {
+        throw new Error("Defensiv rating skal være mellem 1 og 10");
       }
     }
   }
 
   try {
-    console.log(`Opdaterer spiller med ID: ${spillerId}`);
+    // # Hent eksisterende spiller for at tjekke om MV status ændres
+    console.log(`Henter spiller med ID: ${spillerId}`);
+    const eksisterendeSpiller = await db.select().from(spillere).where(eq(spillere.id, spillerId));
     
-    // # Opdater spillerens basale data
-    await db.update(spillere).set({
-      navn: spillerData.navn,
-      nummer: spillerData.nummer,
-      erMV: spillerData.erMV,
-    }).where(eq(spillere.id, spillerId));
-    
+    if (!eksisterendeSpiller || eksisterendeSpiller.length === 0) {
+      throw new Error("Spilleren blev ikke fundet");
+    }
+
+    // # Hvis spilleren bliver målvogter, fjern positioner og ratings
+    if (spillerData.erMV) {
+      spillerData.offensivePositioner = [];
+      spillerData.defensivePositioner = [];
+      spillerData.offensivRating = undefined;
+      spillerData.defensivRating = undefined;
+    } else {
+      // # Validér offensive positioner (skal have præcis én primær)
+      const primærOffensiv = spillerData.offensivePositioner.filter(p => p.erPrimaer);
+      if (primærOffensiv.length !== 1) {
+        throw new Error("Spilleren skal have præcis én primær offensiv position");
+      }
+
+      // # Validér defensive positioner (skal have 1-2 primære)
+      const primærDefensiv = spillerData.defensivePositioner.filter(p => p.erPrimaer);
+      if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
+        throw new Error("Spilleren skal have 1-2 primære defensive positioner");
+      }
+    }
+
+    // # Gem holdId til sti-revalidering
+    const holdId = eksisterendeSpiller[0].holdId;
+
+    // # Opdater spillerens grundlæggende information
+    await db.update(spillere)
+      .set({
+        navn: spillerData.navn,
+        nummer: spillerData.nummer,
+        erMV: spillerData.erMV,
+        offensivRating: spillerData.erMV ? undefined : spillerData.offensivRating,
+        defensivRating: spillerData.erMV ? undefined : spillerData.defensivRating,
+      })
+      .where(eq(spillere.id, spillerId));
+
     // # Håndter positioner
     if (spillerData.erMV) {
       // # Slet alle positioner hvis spilleren er målvogter
@@ -471,7 +504,7 @@ export async function opdaterSpiller(spillerId: number, spillerData: SpillerData
     return true;
   } catch (error) {
     // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved opdatering af spiller med ID ${spillerId}:`, error);
+    console.error("Fejl ved opdatering af spiller:", error);
     throw new Error(`Kunne ikke opdatere spiller: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
 }

@@ -19,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sletTraening } from "./actions";
 import TraeningCard from "@/components/traening/traening-card";
+import { Suspense } from "react";
+import { OevelsesListe } from "./oevelser/_components/oevelse-liste";
 
 // # Metadatainformation for siden
 export const metadata = {
@@ -112,9 +114,11 @@ export default async function TraeningPage() {
             Opret ny træning
           </Link>
         </Button>
-        <Button variant="outline">
-          <DumbbellIcon className="mr-2 h-4 w-4" />
-          Gå til øvelsesbibliotek
+        <Button variant="outline" asChild>
+          <Link href="/traening/oevelser">
+            <DumbbellIcon className="mr-2 h-4 w-4" />
+            Gå til øvelsesbibliotek
+          </Link>
         </Button>
       </div>
 
@@ -202,38 +206,10 @@ export default async function TraeningPage() {
               </Button>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* # Kort til øvelsesbibliotek */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Find øvelser</CardTitle>
-                  <CardDescription>Gennemse øvelsesbiblioteket</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm">Søg blandt eksisterende øvelser kategoriseret efter type og formål.</p>
-                </CardContent>
-                <CardFooter>
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link href="/traening/oevelser">Se alle øvelser</Link>
-                  </Button>
-                </CardFooter>
-              </Card>
-              
-              {/* # Kort til at oprette øvelser */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Opret øvelse</CardTitle>
-                  <CardDescription>Tilføj dine egne øvelser</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm">Opret tilpassede øvelser med positionskrav eller minimumskrav til deltagere.</p>
-                </CardContent>
-                <CardFooter>
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link href="/traening/oevelser">Opret ny øvelse</Link>
-                  </Button>
-                </CardFooter>
-              </Card>
+            <div className="grid gap-6">
+              <Suspense fallback={<p>Indlæser øvelser...</p>}>
+                <OevelsesListe />
+              </Suspense>
             </div>
           </div>
         </TabsContent>

@@ -43,6 +43,8 @@ export default function OpretSpillerDialog({
   const [navn, setNavn] = useState("");
   const [nummer, setNummer] = useState<string>("");
   const [erMV, setErMV] = useState(false);
+  const [offensivRating, setOffensivRating] = useState<string>("");
+  const [defensivRating, setDefensivRating] = useState<string>("");
   
   // # State til positioner - nu med erValgt flag
   const [offensivePositioner, setOffensivePositioner] = useState<Position<OffensivPosition>[]>([]);
@@ -62,6 +64,8 @@ export default function OpretSpillerDialog({
       setNavn("");
       setNummer("");
       setErMV(false);
+      setOffensivRating("");
+      setDefensivRating("");
       
       // # Initialiser offensive positioner
       setOffensivePositioner(
@@ -201,7 +205,7 @@ export default function OpretSpillerDialog({
       return;
     }
     
-    // # Hvis ikke målvogter, validér positioner
+    // # Hvis ikke målvogter, validér positioner og ratings
     if (!erMV) {
       // # Tjek for primær offensiv position
       const primærOffensiv = offensivePositioner.filter(p => p.erPrimaer);
@@ -216,6 +220,16 @@ export default function OpretSpillerDialog({
         setError("Vælg én til to primære defensive positioner");
         return;
       }
+
+      // # Validér ratings hvis de er angivet
+      if (offensivRating && (parseInt(offensivRating) < 1 || parseInt(offensivRating) > 10)) {
+        setError("Offensiv rating skal være mellem 1 og 10");
+        return;
+      }
+      if (defensivRating && (parseInt(defensivRating) < 1 || parseInt(defensivRating) > 10)) {
+        setError("Defensiv rating skal være mellem 1 og 10");
+        return;
+      }
     }
     
     try {
@@ -223,7 +237,6 @@ export default function OpretSpillerDialog({
       setIsSubmitting(true);
       
       // # Forbered spiller-data
-      // # Læg mærke til at vi kun filtrerer valgte positioner
       const spillerData = {
         navn,
         nummer: nummer ? parseInt(nummer) : undefined,
@@ -234,6 +247,8 @@ export default function OpretSpillerDialog({
         defensivePositioner: erMV ? [] : defensivePositioner
           .filter(p => p.erValgt || p.erPrimaer)
           .map(({ position, erPrimaer }) => ({ position, erPrimaer })),
+        offensivRating: !erMV && offensivRating ? parseInt(offensivRating) : undefined,
+        defensivRating: !erMV && defensivRating ? parseInt(defensivRating) : undefined,
       };
       
       // # Kald server-action for at oprette spiller
@@ -468,6 +483,42 @@ export default function OpretSpillerDialog({
                       Primære positioner kan ikke vælges som sekundære.
                     </p>
                   </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Ratings (kun hvis ikke målvogter) */}
+            {!erMV && (
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="offensivRating" className="text-right">
+                    Offensiv Rating
+                  </Label>
+                  <Input
+                    id="offensivRating"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={offensivRating}
+                    onChange={(e) => setOffensivRating(e.target.value)}
+                    className="col-span-3"
+                    placeholder="1-10"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="defensivRating" className="text-right">
+                    Defensiv Rating
+                  </Label>
+                  <Input
+                    id="defensivRating"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={defensivRating}
+                    onChange={(e) => setDefensivRating(e.target.value)}
+                    className="col-span-3"
+                    placeholder="1-10"
+                  />
                 </div>
               </div>
             )}

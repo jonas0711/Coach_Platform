@@ -17,7 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PencilIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { opdaterSpiller, hentSpiller } from "@/lib/db/actions";
-import { OFFENSIVE_POSITIONER, DEFENSIVE_POSITIONER } from "@/lib/db/schema";
+import { OFFENSIVE_POSITIONER, DEFENSIVE_POSITIONER, type OffensivPosition, type DefensivPosition } from "@/lib/db/schema";
 import { useRouter } from "next/navigation";
 
 // # Props til komponenten
@@ -32,12 +32,14 @@ interface FormState {
   navn: string;
   nummer: string;
   erMV: boolean;
+  offensivRating?: string;
+  defensivRating?: string;
   offensivePositioner: {
-    position: string;
+    position: OffensivPosition;
     erPrimaer: boolean;
   }[];
   defensivePositioner: {
-    position: string;
+    position: DefensivPosition;
     erPrimaer: boolean;
   }[];
 }
@@ -54,6 +56,8 @@ export default function RedigerSpillerDialog({
     navn: "",
     nummer: "",
     erMV: false,
+    offensivRating: "",
+    defensivRating: "",
     offensivePositioner: [],
     defensivePositioner: [],
   });
@@ -88,6 +92,8 @@ export default function RedigerSpillerDialog({
         navn: spiller.navn,
         nummer: spiller.nummer?.toString() || "",
         erMV: spiller.erMV,
+        offensivRating: spiller.offensivRating?.toString() || "",
+        defensivRating: spiller.defensivRating?.toString() || "",
         offensivePositioner: spiller.offensivePositioner.map((pos: any) => ({
           position: pos.position,
           erPrimaer: pos.erPrimaer === 1 || pos.erPrimaer === true,
@@ -131,15 +137,36 @@ export default function RedigerSpillerDialog({
     setForm((prev) => ({
       ...prev,
       erMV: checked,
-      // # Nulstil positioner hvis spilleren bliver målvogter
+      // # Nulstil positioner og ratings hvis spilleren bliver målvogter
       ...(checked
-        ? { offensivePositioner: [], defensivePositioner: [] }
+        ? { 
+            offensivePositioner: [], 
+            defensivePositioner: [],
+            offensivRating: "",
+            defensivRating: "",
+          }
         : {}),
     }));
   }
 
+  // # Opdater offensiv rating
+  function updateOffensivRating(rating: string) {
+    // # Tillad kun tal mellem 1-10 og tom streng
+    if (rating === "" || (/^\d+$/.test(rating) && parseInt(rating) >= 1 && parseInt(rating) <= 10)) {
+      setForm((prev) => ({ ...prev, offensivRating: rating }));
+    }
+  }
+
+  // # Opdater defensiv rating
+  function updateDefensivRating(rating: string) {
+    // # Tillad kun tal mellem 1-10 og tom streng
+    if (rating === "" || (/^\d+$/.test(rating) && parseInt(rating) >= 1 && parseInt(rating) <= 10)) {
+      setForm((prev) => ({ ...prev, defensivRating: rating }));
+    }
+  }
+
   // # Håndter ændring af offensiv position
-  function handleOffensivePositionToggle(position: string, checked: boolean) {
+  function handleOffensivePositionToggle(position: OffensivPosition, checked: boolean) {
     setForm((prev) => {
       if (checked) {
         // # Tilføj position hvis den ikke findes
@@ -166,7 +193,7 @@ export default function RedigerSpillerDialog({
   }
 
   // # Håndter ændring af defensiv position
-  function handleDefensivePositionToggle(position: string, checked: boolean) {
+  function handleDefensivePositionToggle(position: DefensivPosition, checked: boolean) {
     setForm((prev) => {
       if (checked) {
         // # Tilføj position hvis den ikke findes
@@ -193,7 +220,7 @@ export default function RedigerSpillerDialog({
   }
 
   // # Håndter ændring af primær offensiv position
-  function handlePrimaryOffensiveToggle(position: string) {
+  function handlePrimaryOffensiveToggle(position: OffensivPosition) {
     setForm((prev) => ({
       ...prev,
       offensivePositioner: prev.offensivePositioner.map((pos) => ({
@@ -204,7 +231,7 @@ export default function RedigerSpillerDialog({
   }
 
   // # Håndter ændring af primær defensiv position
-  function handlePrimaryDefensiveToggle(position: string, checked: boolean) {
+  function handlePrimaryDefensiveToggle(position: DefensivPosition, checked: boolean) {
     setForm((prev) => {
       // # Tæl antallet af nuværende primære positioner
       const currentPrimaryCount = prev.defensivePositioner.filter(
@@ -254,65 +281,50 @@ export default function RedigerSpillerDialog({
     setError(null);
     setIsSubmitting(true);
 
-    // # Validér input
-    if (!form.navn || form.navn.trim() === "") {
-      setError("Spillernavn må ikke være tomt");
-      setIsSubmitting(false);
-      return;
-    }
-
-    // # Konverter til det format som serveren forventer
-    const spillerData = {
-      navn: form.navn,
-      nummer: form.nummer ? parseInt(form.nummer) : undefined,
-      erMV: form.erMV,
-      offensivePositioner: form.offensivePositioner,
-      defensivePositioner: form.defensivePositioner,
-    };
-
-    // # Validér at ikke-målvogtere har mindst én offensiv position
-    if (!form.erMV && form.offensivePositioner.length === 0) {
-      setError("Spilleren skal have mindst én offensiv position");
-      setIsSubmitting(false);
-      return;
-    }
-
-    // # Validér at ikke-målvogtere har præcis én primær offensiv position
-    if (!form.erMV) {
-      const primærOffensiv = form.offensivePositioner.filter((p) => p.erPrimaer);
-      if (primærOffensiv.length !== 1) {
-        setError("Spilleren skal have præcis én primær offensiv position");
-        setIsSubmitting(false);
-        return;
-      }
-    }
-
-    // # Validér at ikke-målvogtere har mindst én defensiv position
-    if (!form.erMV && form.defensivePositioner.length === 0) {
-      setError("Spilleren skal have mindst én defensiv position");
-      setIsSubmitting(false);
-      return;
-    }
-
-    // # Validér at ikke-målvogtere har 1-2 primære defensive positioner
-    if (!form.erMV) {
-      const primærDefensiv = form.defensivePositioner.filter((p) => p.erPrimaer);
-      if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
-        setError("Spilleren skal have 1-2 primære defensive positioner");
-        setIsSubmitting(false);
-        return;
-      }
-    }
-
     try {
-      // # Opdater spiller
-      await opdaterSpiller(spillerId, spillerData);
-      // # Luk dialog når opdatering er fuldført
+      // # Validér at navn ikke er tomt
+      if (!form.navn.trim()) {
+        throw new Error("Navn er påkrævet");
+      }
+
+      // # Validér ratings hvis spilleren ikke er målvogter
+      if (!form.erMV) {
+        if (form.offensivRating && (parseInt(form.offensivRating) < 1 || parseInt(form.offensivRating) > 10)) {
+          throw new Error("Offensiv rating skal være mellem 1 og 10");
+        }
+        if (form.defensivRating && (parseInt(form.defensivRating) < 1 || parseInt(form.defensivRating) > 10)) {
+          throw new Error("Defensiv rating skal være mellem 1 og 10");
+        }
+      }
+
+      // # Validér positioner hvis ikke målvogter
+      if (!form.erMV) {
+        const primærOffensiv = form.offensivePositioner.filter((p) => p.erPrimaer);
+        if (primærOffensiv.length !== 1) {
+          throw new Error("Vælg præcis én primær offensiv position");
+        }
+
+        const primærDefensiv = form.defensivePositioner.filter((p) => p.erPrimaer);
+        if (primærDefensiv.length < 1 || primærDefensiv.length > 2) {
+          throw new Error("Vælg én til to primære defensive positioner");
+        }
+      }
+
+      // # Send data til serveren
+      await opdaterSpiller(spillerId, {
+        navn: form.navn,
+        nummer: form.nummer ? parseInt(form.nummer) : undefined,
+        erMV: form.erMV,
+        offensivRating: !form.erMV && form.offensivRating ? parseInt(form.offensivRating) : undefined,
+        defensivRating: !form.erMV && form.defensivRating ? parseInt(form.defensivRating) : undefined,
+        offensivePositioner: form.offensivePositioner as { position: OffensivPosition; erPrimaer: boolean; }[],
+        defensivePositioner: form.defensivePositioner as { position: DefensivPosition; erPrimaer: boolean; }[],
+      });
+
+      // # Luk dialog og opdater UI
       setOpen(false);
-      // # Refresh siden for at vise ændringerne
       router.refresh();
     } catch (err) {
-      // # Vis fejlmeddelelse hvis opdatering fejler
       setError(err instanceof Error ? err.message : "Der opstod en fejl");
     } finally {
       setIsSubmitting(false);
@@ -479,10 +491,7 @@ export default function RedigerSpillerDialog({
                                 id={`def-prim-${position}`}
                                 checked={isDefensivePrimary(position)}
                                 onCheckedChange={(checked) =>
-                                  handlePrimaryDefensiveToggle(
-                                    position,
-                                    !!checked
-                                  )
+                                  handlePrimaryDefensiveToggle(position, !!checked)
                                 }
                               />
                               <Label
@@ -499,6 +508,42 @@ export default function RedigerSpillerDialog({
                   </div>
                 </TabsContent>
               </Tabs>
+            )}
+
+            {/* Ratings (kun hvis ikke målvogter) */}
+            {!form.erMV && (
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="offensivRating" className="text-right">
+                    Offensiv Rating
+                  </Label>
+                  <Input
+                    id="offensivRating"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={form.offensivRating}
+                    onChange={(e) => updateOffensivRating(e.target.value)}
+                    className="col-span-3"
+                    placeholder="1-10"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="defensivRating" className="text-right">
+                    Defensiv Rating
+                  </Label>
+                  <Input
+                    id="defensivRating"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={form.defensivRating}
+                    onChange={(e) => updateDefensivRating(e.target.value)}
+                    className="col-span-3"
+                    placeholder="1-10"
+                  />
+                </div>
+              </div>
             )}
 
             {/* # Vis fejlmeddelelse hvis der er en */}

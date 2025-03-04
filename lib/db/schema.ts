@@ -20,6 +20,8 @@ export const spillere = sqliteTable("spillere", {
   navn: text("navn").notNull(), // # Spillerens navn er påkrævet
   nummer: integer("nummer"), // # Spillerens nummer er valgfrit
   erMV: integer("er_mv", { mode: "boolean" }).notNull().default(false), // # Om spilleren er målvogter
+  offensivRating: integer("offensiv_rating"), // # Rating for offensive evner (1-10)
+  defensivRating: integer("defensiv_rating"), // # Rating for defensive evner (1-10)
   oprettetDato: integer("oprettet_dato", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()), // # Automatisk tidsstempel for oprettelse

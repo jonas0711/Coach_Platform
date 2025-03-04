@@ -1,10 +1,22 @@
 "use server";
 
-import { db } from "@/lib/db";
-import { traeningOevelser, oevelser, kategorier, fokuspunkter, traeningOevelseDetaljer, traeningOevelseFokuspunkter } from "@/lib/db/schema";
+import { 
+  db, 
+  traeninger, 
+  traeningOevelser, 
+  oevelser, 
+  traeningOevelseDetaljer, 
+  traeningOevelseFokuspunkter,
+  traeningOevelseDeltagere,
+  traeningDeltager,
+  spillere,
+  hold,
+  kategorier,
+  fokuspunkter
+} from "@/lib/db";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { opretFokuspunkt, opretKategori, hentOevelseFokuspunkter } from "@/lib/db/actions";
+import { opretFokuspunkt, opretKategori, hentOevelseFokuspunkter, tilfoejDeltagereOevelse, fjernDeltagereOevelse, hentOevelseDeltagere, tilfoejAlleTilstedevaerende, fjernAlleDeltagere } from "@/lib/db/actions";
 
 // # Interface for at tilføje en øvelse til en træning
 export interface TraeningOevelseData {
@@ -138,12 +150,63 @@ export async function tilfoejOevelseTilTraening(data: TraeningOevelseData) {
       position: position,
     }).returning({ id: traeningOevelser.id });
     
-    console.log(`Øvelse tilføjet med ID: ${result[0].id}`);
+    const traeningOevelseId = result[0].id;
+    console.log(`Øvelse tilføjet med ID: ${traeningOevelseId}`);
     
-    // # Revalidér sti, så siden opdateres
-    revalidatePath(`/traening/faelles/${data.traeningId}`);
+    // # Hent øvelsens detaljer
+    const oevelseData = await db
+      .select({
+        id: oevelser.id,
+        navn: oevelser.navn,
+        beskrivelse: oevelser.beskrivelse,
+        kategoriId: oevelser.kategoriId,
+      })
+      .from(oevelser)
+      .where(eq(oevelser.id, data.oevelseId))
+      .limit(1);
     
-    return result[0].id;
+    if (oevelseData.length > 0) {
+      // # Hent kategorinavnet
+      let kategoriNavn = null;
+      if (oevelseData[0].kategoriId) {
+        const kategoriData = await db
+          .select({ navn: kategorier.navn })
+          .from(kategorier)
+          .where(eq(kategorier.id, oevelseData[0].kategoriId))
+          .limit(1);
+        
+        if (kategoriData.length > 0) {
+          kategoriNavn = kategoriData[0].navn;
+        }
+      }
+      
+      // # Opret lokale detaljer for træningsøvelsen
+      await db.insert(traeningOevelseDetaljer).values({
+        traeningOevelseId: traeningOevelseId,
+        navn: oevelseData[0].navn,
+        beskrivelse: oevelseData[0].beskrivelse,
+        kategoriNavn: kategoriNavn,
+      });
+      
+      console.log(`Lokale detaljer oprettet for træningsøvelse ID: ${traeningOevelseId}`);
+      
+      // # Hent fokuspunkter for øvelsen og tilføj dem lokalt
+      const fokuspunkter = await hentOevelseFokuspunkter(data.oevelseId);
+      if (fokuspunkter.length > 0) {
+        for (const fp of fokuspunkter) {
+          await db.insert(traeningOevelseFokuspunkter).values({
+            traeningOevelseId: traeningOevelseId,
+            fokuspunktId: fp.id,
+          });
+        }
+        console.log(`${fokuspunkter.length} fokuspunkter kopieret til træningsøvelse ID: ${traeningOevelseId}`);
+      }
+    }
+    
+    // # Revalidér sti, så siden opdateres (med 'page' parameter for at sikre fuld opdatering)
+    revalidatePath(`/traening/faelles/${data.traeningId}`, 'page');
+    
+    return traeningOevelseId;
   } catch (error) {
     console.error("Fejl ved tilføjelse af øvelse til træning:", error);
     throw new Error(`Kunne ikke tilføje øvelse til træning: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
@@ -247,130 +310,125 @@ export interface LokalTraeningOevelseData {
 }
 
 // # Opdater en træningsøvelse lokalt (kun i træningen, ikke i øvelsesbiblioteket)
-export async function opdaterLokalTraeningOevelse(data: LokalTraeningOevelseData) {
+export async function opdaterLokalTraeningOevelse(data: {
+  id: number;
+  navn: string;
+  beskrivelse: string | null;
+  kategoriNavn: string | null;
+  fokuspunkter: string[];
+}) {
   try {
     console.log(`Opdaterer lokal træningsøvelse med ID: ${data.id}`);
     
-    // # Hent først den aktuelle træningsøvelse for at få traeningId
-    const trainingExercise = await db
-      .select({
-        traeningId: traeningOevelser.traeningId,
-        oevelseId: traeningOevelser.oevelseId
-      })
+    // # Find øvelsen
+    const traeningOevelseData = await db
+      .select()
       .from(traeningOevelser)
       .where(eq(traeningOevelser.id, data.id))
       .limit(1);
     
-    if (trainingExercise.length === 0) {
+    if (traeningOevelseData.length === 0) {
       throw new Error("Træningsøvelse ikke fundet");
     }
     
-    const traeningId = trainingExercise[0].traeningId;
-    const oevelseId = trainingExercise[0].oevelseId;
+    const traeningOevelseId = traeningOevelseData[0].id;
+    const traeningId = traeningOevelseData[0].traeningId;
+    const oevelseId = traeningOevelseData[0].oevelseId;
     
-    // # Håndter kategori hvis angivet (gemmer den i kategorier-tabellen)
-    let kategoriId = null;
-    if (data.kategoriNavn && data.kategoriNavn.trim() !== "") {
-      console.log(`Sikrer at kategori '${data.kategoriNavn}' findes i databasen`);
-      
-      // # Opret eller genbrug kategori
-      const kategoriResultat = await opretKategori(data.kategoriNavn);
-      kategoriId = kategoriResultat.id;
-      
-      if (kategoriResultat.nyOprettet) {
-        console.log(`Ny kategori '${data.kategoriNavn}' oprettet i databasen med ID: ${kategoriResultat.id}`);
-      } else {
-        console.log(`Kategori '${data.kategoriNavn}' fandtes allerede i databasen med ID: ${kategoriResultat.id}`);
-      }
+    console.log(`Fandt træningsøvelse med ID: ${traeningOevelseId}, tilhører træning ID: ${traeningId}`);
+    
+    // # Opdater øvelsesdetaljer
+    console.log(`Opdaterer detaljer: navn='${data.navn}', kategori=${data.kategoriNavn}, beskrivelse=${data.beskrivelse !== null ? `'${data.beskrivelse}'` : 'null'}`);
+    
+    // # Tjek om detaljer allerede eksisterer
+    const eksisterendeDetaljer = await db
+      .select()
+      .from(traeningOevelseDetaljer)
+      .where(eq(traeningOevelseDetaljer.traeningOevelseId, data.id))
+      .limit(1);
+    
+    if (eksisterendeDetaljer.length > 0) {
+      // # Opdater eksisterende detaljer
+      await db
+        .update(traeningOevelseDetaljer)
+        .set({
+          navn: data.navn,
+          beskrivelse: data.beskrivelse,
+          kategoriNavn: data.kategoriNavn,
+        })
+        .where(eq(traeningOevelseDetaljer.traeningOevelseId, data.id));
+    } else {
+      // # Opret nye detaljer hvis de ikke findes
+      await db
+        .insert(traeningOevelseDetaljer)
+        .values({
+          traeningOevelseId: data.id,
+          navn: data.navn,
+          beskrivelse: data.beskrivelse,
+          kategoriNavn: data.kategoriNavn,
+        });
     }
     
-    // # Håndter fokuspunkter hvis angivet
-    let fokuspunktIds = [];
+    console.log(`Øvelsesdetaljer opdateret for træningsøvelse ID: ${data.id}`);
+    
+    // # Håndter fokuspunkter
     if (data.fokuspunkter && data.fokuspunkter.length > 0) {
-      console.log(`Håndterer ${data.fokuspunkter.length} fokuspunkter for lokalt opdateret øvelse`);
+      // # Hent eksisterende fokuspunkter eller opret nye
+      const fokuspunktIds = [];
       
-      // # Tilføj alle nye fokuspunkter til databasen
+      console.log(`Behandler ${data.fokuspunkter.length} fokuspunkter: ${data.fokuspunkter.join(', ')}`);
+      
       for (const fokuspunktTekst of data.fokuspunkter) {
-        if (fokuspunktTekst.trim() !== "") {
-          // # Opret eller genbrug fokuspunkt
-          const fokuspunktResultat = await opretFokuspunkt(fokuspunktTekst);
-          fokuspunktIds.push(fokuspunktResultat.id);
-          
-          if (fokuspunktResultat.nyOprettet) {
-            console.log(`Nyt fokuspunkt '${fokuspunktTekst}' oprettet i databasen med ID: ${fokuspunktResultat.id}`);
-          } else {
-            console.log(`Fokuspunkt '${fokuspunktTekst}' fandtes allerede i databasen med ID: ${fokuspunktResultat.id}`);
-          }
+        // # Tjek om fokuspunktet allerede eksisterer
+        const eksisterendeFokuspunkt = await db
+          .select()
+          .from(fokuspunkter)
+          .where(eq(fokuspunkter.tekst, fokuspunktTekst))
+          .limit(1);
+        
+        let fokuspunktId;
+        
+        if (eksisterendeFokuspunkt.length > 0) {
+          // # Brug eksisterende fokuspunkt
+          fokuspunktId = eksisterendeFokuspunkt[0].id;
+          console.log(`Bruger eksisterende fokuspunkt: "${fokuspunktTekst}" (ID: ${fokuspunktId})`);
+        } else {
+          // # Opret nyt fokuspunkt
+          const nytFokuspunkt = await opretFokuspunkt(fokuspunktTekst);
+          fokuspunktId = nytFokuspunkt.id;
+          console.log(`Oprettet nyt fokuspunkt: "${fokuspunktTekst}" (ID: ${fokuspunktId})`);
         }
-      }
-    }
-    
-    try {
-      // # Tjek om der allerede findes en lokal override for denne træningsøvelse
-      const eksisterendeDetaljer = await db
-        .select({ id: traeningOevelseDetaljer.id })
-        .from(traeningOevelseDetaljer)
-        .where(eq(traeningOevelseDetaljer.traeningOevelseId, data.id))
-        .limit(1);
-      
-      // # Opdater eller opret lokale detaljer
-      if (eksisterendeDetaljer.length > 0) {
-        // # Opdater eksisterende detaljer
-        await db
-          .update(traeningOevelseDetaljer)
-          .set({
-            navn: data.navn,
-            beskrivelse: data.beskrivelse,
-            kategoriNavn: data.kategoriNavn,
-            sidstOpdateret: new Date()
-          })
-          .where(eq(traeningOevelseDetaljer.id, eksisterendeDetaljer[0].id));
         
-        console.log(`Opdateret eksisterende lokale detaljer med ID: ${eksisterendeDetaljer[0].id}`);
-      } else {
-        // # Opret nye detaljer
-        const resultat = await db
-          .insert(traeningOevelseDetaljer)
-          .values({
-            traeningOevelseId: data.id,
-            navn: data.navn,
-            beskrivelse: data.beskrivelse,
-            kategoriNavn: data.kategoriNavn,
-            sidstOpdateret: new Date()
-          })
-          .returning({ id: traeningOevelseDetaljer.id });
-        
-        console.log(`Oprettet nye lokale detaljer med ID: ${resultat[0].id}`);
+        fokuspunktIds.push(fokuspunktId);
       }
       
-      // # Opdater fokuspunkter hvis angivet
+      // # Opdater fokuspunkter for træningsøvelsen
       if (fokuspunktIds.length > 0) {
-        try {
-          // # Fjern først alle eksisterende fokuspunkter for denne træningsøvelse
+        // # Fjern først alle eksisterende fokuspunkter for denne træningsøvelse
+        await db
+          .delete(traeningOevelseFokuspunkter)
+          .where(eq(traeningOevelseFokuspunkter.traeningOevelseId, data.id));
+        
+        console.log(`Fjernet eksisterende fokuspunkter for træningsøvelse ID: ${data.id}`);
+        
+        // # Tilføj de nye fokuspunkter
+        for (const fokuspunktId of fokuspunktIds) {
           await db
-            .delete(traeningOevelseFokuspunkter)
-            .where(eq(traeningOevelseFokuspunkter.traeningOevelseId, data.id));
-          
-          // # Tilføj de nye fokuspunkter
-          for (const fokuspunktId of fokuspunktIds) {
-            await db
-              .insert(traeningOevelseFokuspunkter)
-              .values({
-                traeningOevelseId: data.id,
-                fokuspunktId: fokuspunktId
-              });
-          }
-          
-          console.log(`Opdateret ${fokuspunktIds.length} fokuspunkter for træningsøvelse ID: ${data.id}`);
-        } catch (fokusError) {
-          console.log(`Fejl ved opdatering af fokuspunkter: ${fokusError instanceof Error ? fokusError.message : "Ukendt fejl"}`);
-          console.log("Dette kan skyldes at tabellen traeningOevelseFokuspunkter ikke eksisterer endnu. Kør migrations for at oprette tabellerne.");
+            .insert(traeningOevelseFokuspunkter)
+            .values({
+              traeningOevelseId: data.id,
+              fokuspunktId,
+            });
+          console.log(`Tilføjet fokuspunkt ID: ${fokuspunktId} til træningsøvelse ID: ${data.id}`);
         }
       }
-    } catch (detailsError) {
-      console.log(`Fejl ved opdatering af lokale detaljer: ${detailsError instanceof Error ? detailsError.message : "Ukendt fejl"}`);
-      console.log("Dette kan skyldes at tabellen traeningOevelseDetaljer ikke eksisterer endnu. Kør migrations for at oprette tabellerne.");
-      console.log("Lokale ændringer blev IKKE gemt i databasen, men kategorier og fokuspunkter blev oprettet/opdateret.");
+    } else {
+      // # Hvis der ikke er nogen fokuspunkter, fjern alle eksisterende
+      await db
+        .delete(traeningOevelseFokuspunkter)
+        .where(eq(traeningOevelseFokuspunkter.traeningOevelseId, data.id));
+      
+      console.log(`Ingen fokuspunkter angivet, alle eksisterende fokuspunkter er fjernet for træningsøvelse ID: ${data.id}`);
     }
     
     console.log(`Lokale ændringer for træningsøvelse med ID: ${data.id} er blevet behandlet:`);
@@ -379,8 +437,9 @@ export async function opdaterLokalTraeningOevelse(data: LokalTraeningOevelseData
     console.log(`- Beskrivelse: ${data.beskrivelse}`);
     console.log(`- Fokuspunkter: ${data.fokuspunkter?.join(', ')}`);
     
-    // # Revalidér sti, så siden opdateres
-    revalidatePath(`/traening/faelles/${traeningId}`);
+    // # Revalidér sti med page type for at sikre fuld opdatering
+    console.log(`Revaliderer sti med træning ID: ${traeningId}`);
+    revalidatePath(`/traening/faelles/${traeningId}`, 'page');
     
     return { success: true };
   } catch (error) {
@@ -436,5 +495,55 @@ export async function hentTraeningOevelseFokuspunkter(traeningOevelseId: number)
   } catch (error) {
     console.error(`Fejl ved hentning af fokuspunkter for træningsøvelse ID: ${traeningOevelseId}:`, error);
     throw new Error(`Kunne ikke hente fokuspunkter: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Eksporter funktioner til at håndtere deltagere i øvelser
+export { tilfoejDeltagereOevelse, fjernDeltagereOevelse, hentOevelseDeltagere, tilfoejAlleTilstedevaerende, fjernAlleDeltagere };
+
+// # Interface for at opdatere deltagere i en øvelse
+export interface OevelseDeltagereData {
+  traeningOevelseId: number;
+  spillerIds: number[];
+}
+
+// # Interface for en deltager
+interface Deltager {
+  spillerId: number;
+  navn: string;
+  nummer: number | null;
+  erMaalMand: boolean;
+  holdId: number;
+  holdNavn: string;
+  tilstede: boolean;
+}
+
+/**
+ * Henter alle deltagere til en træning
+ * @param traeningId ID på træningen
+ * @returns Liste af deltagere
+ */
+export async function hentTraeningDeltagere(traeningId: number): Promise<Deltager[]> {
+  try {
+    // # Hent alle spillere der er tilmeldt træningen (via hold eller individuelt)
+    const deltagere = await db
+      .select({
+        spillerId: spillere.id,
+        navn: spillere.navn,
+        nummer: spillere.nummer,
+        erMaalMand: spillere.erMV,
+        holdId: hold.id,
+        holdNavn: hold.navn,
+        tilstede: traeningDeltager.tilstede,
+      })
+      .from(traeningDeltager)
+      .innerJoin(spillere, eq(traeningDeltager.spillerId, spillere.id))
+      .innerJoin(hold, eq(spillere.holdId, hold.id))
+      .where(eq(traeningDeltager.traeningId, traeningId));
+
+    return deltagere;
+  } catch (error) {
+    console.error("Fejl ved hentning af deltagere:", error);
+    throw new Error("Kunne ikke hente deltagere");
   }
 } 

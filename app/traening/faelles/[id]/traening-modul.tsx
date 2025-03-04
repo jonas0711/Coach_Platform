@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Card,
   CardContent,
@@ -36,13 +36,21 @@ import {
   fjernOevelseFraTraening, 
   opdaterAlleTraeningOevelsePositioner,
   opdaterLokalTraeningOevelse,
-  hentTraeningOevelseFokuspunkter
+  hentTraeningOevelseFokuspunkter,
+  hentTraeningDeltagere,
+  tilfoejAlleTilstedevaerende,
+  hentOevelseDeltagere,
+  tilfoejDeltagereOevelse
 } from "./actions";
 import { hentAlleOevelser, hentAlleKategorier, hentAlleFokuspunkter, hentOevelseFokuspunkter } from "@/lib/db/actions";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { OevelseFormPopup } from './_components/oevelse-form-popup';
 import { OevelseRedigerForm } from './_components/oevelse-rediger-form';
+import { OevelseDeltagereForm } from './_components/oevelse-deltagere-form';
+import { DeltagerValgModal } from './_components/deltager-valg-modal';
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 // # Interface til at definere props til komponenten
 interface TraeningModulProps {
@@ -77,6 +85,16 @@ interface TraeningOevelse {
   };
 }
 
+// # Type til en deltager
+interface Deltager {
+  spillerId: number;
+  navn: string;
+  nummer: number | null;
+  erMV: boolean;
+  holdId: number;
+  holdNavn: string;
+}
+
 // # Hovedkomponent for visning og håndtering af træning med moduler
 export function TraeningModul({ traeningId }: TraeningModulProps) {
   // # Router til navigation
@@ -90,8 +108,8 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
   const [filteredeOevelser, setFilteredeOevelser] = useState<Oevelse[]>([]);
   // # State til at holde styr på om vi viser dialogen til at tilføje øvelser
   const [visOevelsesDialog, setVisOevelsesDialog] = useState(false);
-  // # State til at holde styr på om vi viser "Opret" eller "Find" øvelse
-  const [dialogTilstand, setDialogTilstand] = useState<'menu' | 'opret' | 'find'>('menu');
+  // # State til at holde styr på om vi viser "Opret" eller "Find" øvelse eller vælger deltagere
+  const [dialogTilstand, setDialogTilstand] = useState<'menu' | 'opret' | 'find' | 'vaelg-deltagere'>('menu');
   // # State til at holde styr på om vi er ved at indlæse data
   const [indlaeser, setIndlaeser] = useState(true);
   // # State til at holde styr på søgeord
@@ -108,57 +126,68 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
   const [aktuelleOevelseFokuspunkter, setAktuelleOevelseFokuspunkter] = useState<string[]>([]);
   // # State til at holde styr på om vi indlæser fokuspunkter
   const [indlaeserFokuspunkter, setIndlaeserFokuspunkter] = useState(false);
+  // # State til at holde styr på tilstedeværende deltagere
+  const [tilstedevaerende, setTilstedevaerende] = useState<Deltager[]>([]);
   
-  // # Hent træningsøvelser ved komponentoprettelse
+  // # Nye state-variabler til deltagervalg inden øvelse tilføjes
+  const [deltagerValgOpen, setDeltagerValgOpen] = useState(false);
+  const [deltagerValgLadning, setDeltagerValgLadning] = useState(false);
+  const [valgteTilstedevaerende, setValgteTilstedevaerende] = useState(true);
+  // # State til at holde styr på valgte individuelle deltagere
+  const [valgteIndividuelleDeltagere, setValgteIndividuelleDeltagere] = useState<number[]>([]);
+  
+  // # Hent data når komponenten indlæses
   useEffect(() => {
-    async function hentData() {
+    // # Indlæs data
+    const hentData = async () => {
+      setIndlaeser(true);
       try {
-        setIndlaeser(true);
         // # Hent træningsøvelser
         const oevelser = await hentTraeningOevelser(traeningId);
         setTraeningOevelser(oevelser as TraeningOevelse[]);
         
-        // # Hent kategorier og fokuspunkter til redigering
-        const [kategoriData, fokuspunktData] = await Promise.all([
-          hentAlleKategorier(),
-          hentAlleFokuspunkter()
-        ]);
+        // # Hent alle øvelser til tilføjelse
+        const alleOev = await hentAlleOevelser();
+        setAlleOevelser(alleOev);
+        setFilteredeOevelser(alleOev);
         
-        setAlleKategorier(kategoriData.map(k => k.navn));
-        setAlleFokuspunkter(fokuspunktData.map(f => f.tekst));
+        // # Hent alle kategorier
+        const kategorier = await hentAlleKategorier();
+        setAlleKategorier(kategorier.map(k => k.navn));
         
-        // # Færdig med at indlæse
+        // # Hent alle fokuspunkter
+        const fokuspunkter = await hentAlleFokuspunkter();
+        setAlleFokuspunkter(fokuspunkter.map(f => f.tekst));
+        
+        // # Hent tilstedeværende deltagere
+        try {
+          const deltagere = await hentTraeningDeltagere(traeningId);
+          const tilstedeSpillere = deltagere
+            .filter(d => d.tilstede)
+            .map(d => ({
+              spillerId: d.spillerId,
+              navn: d.navn,
+              nummer: d.nummer,
+              erMV: d.erMaalMand,
+              holdId: d.holdId,
+              holdNavn: d.holdNavn
+            }));
+          setTilstedevaerende(tilstedeSpillere);
+        } catch (error) {
+          console.error("Fejl ved hentning af deltagere:", error);
+          toast.error("Der opstod en fejl ved hentning af deltagere");
+        }
+        
         setIndlaeser(false);
       } catch (error) {
-        console.error("Fejl ved hentning af træningsøvelser:", error);
-        toast.error("Der opstod en fejl ved hentning af træningsøvelser");
+        console.error("Fejl ved indlæsning af data:", error);
+        toast.error("Der opstod en fejl ved indlæsning af data");
         setIndlaeser(false);
       }
-    }
+    };
     
     hentData();
   }, [traeningId]);
-  
-  // # Hent alle øvelser når dialogen åbnes
-  useEffect(() => {
-    async function hentOevelser() {
-      if (dialogTilstand === 'find' && alleOevelser.length === 0) {
-        try {
-          setUdfoerendeHandling(true);
-          const oevelser = await hentAlleOevelser();
-          setAlleOevelser(oevelser);
-          setFilteredeOevelser(oevelser);
-          setUdfoerendeHandling(false);
-        } catch (error) {
-          console.error("Fejl ved hentning af øvelser:", error);
-          toast.error("Der opstod en fejl ved hentning af øvelser");
-          setUdfoerendeHandling(false);
-        }
-      }
-    }
-    
-    hentOevelser();
-  }, [dialogTilstand, alleOevelser.length]);
   
   // # Filtrer øvelser baseret på søgeord
   useEffect(() => {
@@ -284,27 +313,208 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
   const tilfoejOevelse = async (oevelse: Oevelse) => {
     try {
       setUdfoerendeHandling(true);
-      
-      // # Tilføj øvelsen til databasen
+
+      console.log("Tilføj øvelse data:", oevelse);
+      console.log("Valgte alle tilstedeværende:", valgteTilstedevaerende);
+      console.log("Valgte individuelle deltagere:", valgteIndividuelleDeltagere);
+
+      // # Tilføj øvelsen til træningen
       const id = await tilfoejOevelseTilTraening({
         traeningId,
         oevelseId: oevelse.id
       });
       
+      if (id) {
+        // # Hvis "Alle tilstedeværende" er valgt, tilføj dem til øvelsen
+        if (valgteTilstedevaerende) {
+          console.log("Tilføjer alle tilstedeværende til øvelsen");
+          await tilfoejAlleTilstedevaerende(id);
+        } 
+        // # Hvis individuelle deltagere er valgt, tilføj dem til øvelsen
+        else if (valgteIndividuelleDeltagere.length > 0) {
+          console.log(`Tilføjer ${valgteIndividuelleDeltagere.length} individuelle deltagere til øvelsen`);
+          
+          try {
+            const result = await tilfoejDeltagereOevelse(id, valgteIndividuelleDeltagere);
+            console.log("Resultat af tilføjelse af deltagere:", result);
+            toast.success(`${valgteIndividuelleDeltagere.length} deltagere tilføjet til øvelsen`);
+          } catch (error) {
+            console.error("Fejl ved tilføjelse af individuelle deltagere:", error);
+            toast.error("Der skete en fejl ved tilføjelse af deltagere");
+          }
+        }
+        
+        // # Genindlæs øvelser
+        await genindlaesOevelser();
+      }
+      
+      // # Luk dialog og nulstil tilstand
+      setVisOevelsesDialog(false);
+      setDialogTilstand('menu');
+      setValgteIndividuelleDeltagere([]);
+      
+      toast.success(`Øvelse "${oevelse.navn}" tilføjet til træningen`);
+      
+      return id; // # Returner ID for at kunne tilføje deltagere
+    } catch (error) {
+      console.error("Fejl ved tilføjelse af øvelse:", error);
+      toast.error("Der opstod en fejl ved tilføjelse af øvelse");
+      setUdfoerendeHandling(false);
+      return null;
+    }
+  };
+  
+  // # Håndter dialog-valg
+  const haandterDialogValg = (valg: 'opret' | 'find' | 'vaelg-deltagere') => {
+    setDialogTilstand(valg);
+  };
+  
+  // # Nulstil dialog når den lukkes
+  const nulstilDialog = () => {
+    setDialogTilstand('menu');
+    setSoegeord('');
+    setValgteTilstedevaerende(true);
+  };
+  
+  // # Nye funktioner til at håndtere deltagervalg
+  
+  // # Vis dialogen til at vælge deltagere
+  const startOevelsesTilfoejelse = () => {
+    // # Åbn deltagervalgs-dialogen først
+    setDeltagerValgOpen(true);
+  };
+  
+  // # Håndter klik på "Alle tilstedeværende" i deltager-valg-modal
+  const haandterVaelgAlleTilstedevaerende = useCallback(async () => {
+    try {
+      setDeltagerValgLadning(true);
+      console.log("Vælger alle tilstedeværende deltagere");
+      setValgteTilstedevaerende(true);
+      setDeltagerValgOpen(false);
+      
+      // Vent et øjeblik før øvelsesdialogen åbnes for bedre brugeroplevelse
+      setTimeout(() => {
+        // Åbn øvelsesdialogen og sæt den til 'menu' tilstand
+        setDialogTilstand('menu');
+        setVisOevelsesDialog(true);
+      }, 150);
+    } catch (error) {
+      console.error("Fejl ved valg af alle tilstedeværende:", error);
+      toast.error("Der skete en fejl ved valg af alle tilstedeværende");
+    } finally {
+      setDeltagerValgLadning(false);
+    }
+  }, []);
+  
+  // # Håndterer klik på "Vælg deltagere" i deltager-valg-modal
+  const haandterVaelgIndividuelle = useCallback(async () => {
+    try {
+      setDeltagerValgLadning(true);
+      console.log("Åbner for individuel udvælgelse af deltagere");
+      setValgteTilstedevaerende(false);
+      setDeltagerValgOpen(false);
+      
+      // Nulstil valgte individuelle deltagere
+      setValgteIndividuelleDeltagere([]);
+      
+      // Vent et øjeblik før deltagerudvælgelsesdialogen åbnes for bedre brugeroplevelse
+      setTimeout(() => {
+        // Vis deltagerudvælgelsesdialogen
+        setDialogTilstand('vaelg-deltagere');
+        setVisOevelsesDialog(true);
+      }, 150);
+    } catch (error) {
+      console.error("Fejl ved åbning af individuel udvælgelse:", error);
+      toast.error("Der skete en fejl ved åbning af individuel udvælgelse");
+    } finally {
+      setDeltagerValgLadning(false);
+    }
+  }, []);
+  
+  // Funktion til at fortsætte til øvelsesvalg efter deltagerudvælgelse
+  const fortsaetTilOevelsesvalg = () => {
+    if (valgteIndividuelleDeltagere.length === 0) {
+      toast.error("Du skal vælge mindst én deltager");
+      return;
+    }
+    
+    // Skift til øvelsesvalg-menuen
+    setDialogTilstand('menu');
+  };
+  
+  // Funktion til at håndtere check/uncheck af en deltager
+  const haandterDeltagerValg = (spillerId: number, checked: boolean) => {
+    if (checked) {
+      // Tilføj til valgte deltagere hvis ikke allerede valgt
+      if (!valgteIndividuelleDeltagere.includes(spillerId)) {
+        setValgteIndividuelleDeltagere([...valgteIndividuelleDeltagere, spillerId]);
+      }
+    } else {
+      // Fjern fra valgte deltagere
+      setValgteIndividuelleDeltagere(valgteIndividuelleDeltagere.filter(id => id !== spillerId));
+    }
+  };
+  
+  // # Genindlæs øvelser
+  const genindlaesOevelser = async () => {
+    try {
+      console.log("Genindlæser øvelser...");
+      const opdateredeOevelser = await hentTraeningOevelser(traeningId);
+      
+      setTraeningOevelser(opdateredeOevelser as TraeningOevelse[]);
+      console.log("Øvelser genindlæst:", opdateredeOevelser);
+    } catch (error) {
+      console.error("Fejl ved genindlæsning af øvelser:", error);
+    }
+  };
+
+  // # Tilføj alle tilstedeværende til en øvelse
+  const tilfoejAlleTilstedevaerende = async (traeningOevelseId: number) => {
+    try {
+      console.log(`Tilføjer alle tilstedeværende til øvelse med ID: ${traeningOevelseId}`);
+      setUdfoerendeHandling(true);
+      
+      // # Kald funktion der tilføjer alle tilstedeværende deltagere
+      const resultat = await import('./actions').then(mod => 
+        mod.tilfoejAlleTilstedevaerende(traeningOevelseId, traeningId)
+      );
+      
+      if (resultat && resultat.success) {
+        console.log("Tilføjede alle tilstedeværende deltagere:", resultat);
+        toast.success(`Tilføjede ${resultat.count} tilstedeværende deltagere`);
+        // # Opdater deltagerlisten
+        await genindlaesOevelser();
+      } else {
+        console.error("Fejl ved tilføjelse af alle tilstedeværende");
+        toast.error("Der skete en fejl ved tilføjelse af deltagere");
+      }
+    } catch (error) {
+      console.error("Fejl ved tilføjelse af alle tilstedeværende:", error);
+      toast.error("Der skete en fejl ved tilføjelse af deltagere");
+    } finally {
+      setUdfoerendeHandling(false);
+    }
+  };
+  
+  // # Håndter succesfuld oprettelse af øvelse
+  const haandterOpretOevelseSuccess = async (oevelseId: number, oevelseNavn: string) => {
+    try {
+      console.log(`Øvelse "${oevelseNavn}" (ID: ${oevelseId}) oprettet`);
+      
       // # Opret en ny træningsøvelse
       const nyTraeningOevelse: TraeningOevelse = {
-        id,
+        id: -1, // # Midlertidigt ID, vil blive opdateret ved genindlæsning
         traeningId,
-        oevelseId: oevelse.id,
+        oevelseId: oevelseId,
         position: traeningOevelser.length + 1,
         oevelse: {
-          id: oevelse.id,
-          navn: oevelse.navn,
-          beskrivelse: oevelse.beskrivelse || null,
-          billedeSti: oevelse.billedeSti || null,
-          brugerPositioner: oevelse.brugerPositioner,
-          minimumDeltagere: oevelse.minimumDeltagere || null,
-          kategoriNavn: oevelse.kategoriNavn || null,
+          id: oevelseId,
+          navn: oevelseNavn,
+          beskrivelse: null,
+          billedeSti: null,
+          brugerPositioner: false,
+          minimumDeltagere: null,
+          kategoriNavn: null,
         }
       };
       
@@ -314,26 +524,30 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
       // # Luk dialogen
       setVisOevelsesDialog(false);
       setDialogTilstand('menu');
-      setSoegeord('');
       
-      setUdfoerendeHandling(false);
-      toast.success(`Øvelse "${oevelse.navn}" tilføjet til træningen`);
+      // # Vis bekræftelse
+      toast.success(`Øvelse "${oevelseNavn}" oprettet og tilføjet til træningen`);
+      
+      // # Genindlæs øvelser for at få korrekte data og ID
+      console.log("Genindlæser træningsøvelser for at få korrekt ID");
+      const oevelser = await hentTraeningOevelser(traeningId);
+      const opdateredeOevelser = oevelser as TraeningOevelse[];
+      setTraeningOevelser(opdateredeOevelser);
+      
+      // # Find det opdaterede ID for den øvelse vi lige har tilføjet
+      const nyOevelseId = opdateredeOevelser.find(o => o.oevelseId === oevelseId)?.id;
+      
+      // # Hvis "Alle deltager" blev valgt og øvelses-ID blev oprettet korrekt
+      if (valgteTilstedevaerende && nyOevelseId) {
+        console.log(`Tilføjer alle tilstedeværende til ny øvelse (ID: ${nyOevelseId})`);
+        await tilfoejAlleTilstedevaerende(nyOevelseId);
+      } else {
+        console.log("Ingen automatisk tilføjelse af deltagere til øvelsen");
+      }
     } catch (error) {
-      console.error("Fejl ved tilføjelse af øvelse:", error);
-      toast.error("Der opstod en fejl ved tilføjelse af øvelse");
-      setUdfoerendeHandling(false);
+      console.error("Fejl ved håndtering af øvelsesoprettelse:", error);
+      toast.error("Der opstod en fejl ved tilføjelse af øvelsen");
     }
-  };
-  
-  // # Håndter dialog-valg
-  const haandterDialogValg = (valg: 'opret' | 'find') => {
-    setDialogTilstand(valg);
-  };
-  
-  // # Nulstil dialog når den lukkes
-  const nulstilDialog = () => {
-    setDialogTilstand('menu');
-    setSoegeord('');
   };
   
   // # Udvid eller sammentræk en øvelse
@@ -432,17 +646,31 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Træningsøvelser</h2>
         
-        <Dialog open={visOevelsesDialog} onOpenChange={(open) => {
-          setVisOevelsesDialog(open);
-          if (!open) nulstilDialog();
-        }}>
-          <DialogTrigger asChild>
-            <Button onClick={() => setVisOevelsesDialog(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Tilføj øvelse
-            </Button>
-          </DialogTrigger>
-          
+        {/* Deltagervalgs-dialog */}
+        <DeltagerValgModal 
+          aaben={deltagerValgOpen}
+          onClose={() => setDeltagerValgOpen(false)}
+          onVaelgTilstedevaerende={haandterVaelgAlleTilstedevaerende}
+          onVaelgIndividuelle={haandterVaelgIndividuelle}
+          ladning={deltagerValgLadning}
+        />
+        
+        {/* Knap til at starte processen - uafhængig af dialog-komponenterne */}
+        <Button onClick={startOevelsesTilfoejelse}>
+          <Plus className="mr-2 h-4 w-4" />
+          Tilføj øvelse
+        </Button>
+        
+        {/* Øvelses-dialog - Helt separat fra knappen */}
+        <Dialog 
+          open={visOevelsesDialog} 
+          onOpenChange={(open) => {
+            setVisOevelsesDialog(open);
+            if (!open) {
+              nulstilDialog();
+            }
+          }}
+        >
           <DialogContent 
             className={dialogTilstand === 'opret' ? "sm:max-w-4xl" : "sm:max-w-md"}
             style={dialogTilstand === 'opret' ? { maxHeight: '90vh', height: 'auto' } : {}}
@@ -450,32 +678,48 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
             <DialogHeader>
               <DialogTitle>
                 {dialogTilstand === 'menu' ? 'Tilføj øvelse til træning' : 
-                 dialogTilstand === 'opret' ? 'Opret ny øvelse' : 'Find øvelse'}
+                 dialogTilstand === 'opret' ? 'Opret ny øvelse' : 
+                 dialogTilstand === 'find' ? 'Find øvelse' : 'Vælg deltagere'}
               </DialogTitle>
               <DialogDescription>
                 {dialogTilstand === 'menu' ? 'Vælg om du vil oprette en ny øvelse eller finde en eksisterende' : 
-                 dialogTilstand === 'opret' ? 'Udfyld formularen for at oprette en ny øvelse' : 'Søg efter en eksisterende øvelse'}
+                 dialogTilstand === 'opret' ? 'Udfyld formularen for at oprette en ny øvelse' : 
+                 dialogTilstand === 'find' ? 'Søg efter en eksisterende øvelse' : 'Vælg deltagere'}
               </DialogDescription>
             </DialogHeader>
             
             {dialogTilstand === 'menu' && (
-              <div className="grid grid-cols-2 gap-4 py-4">
+              <div className="grid grid-cols-2 gap-6">
                 <Button 
                   variant="outline" 
-                  className="h-32 flex flex-col items-center justify-center gap-2"
+                  className="flex flex-col items-center justify-start border-2 p-0 h-auto overflow-hidden hover:bg-gray-50"
                   onClick={() => haandterDialogValg('opret')}
                 >
-                  <Plus className="h-8 w-8" />
-                  <span>Opret øvelse</span>
+                  <div className="w-full bg-gray-50 p-4 border-b">
+                    <Plus className="h-8 w-8 mx-auto" />
+                  </div>
+                  <div className="p-4 w-full flex flex-col items-center">
+                    <span className="font-semibold text-base mb-2">Opret øvelse</span>
+                    <span className="text-xs text-muted-foreground text-center">
+                      Opret en helt ny øvelse til dit øvelsesbibliotek
+                    </span>
+                  </div>
                 </Button>
                 
                 <Button 
                   variant="outline" 
-                  className="h-32 flex flex-col items-center justify-center gap-2"
+                  className="flex flex-col items-center justify-start border-2 p-0 h-auto overflow-hidden hover:bg-gray-50"
                   onClick={() => haandterDialogValg('find')}
                 >
-                  <Search className="h-8 w-8" />
-                  <span>Find øvelse</span>
+                  <div className="w-full bg-gray-50 p-4 border-b">
+                    <Search className="h-8 w-8 mx-auto" />
+                  </div>
+                  <div className="p-4 w-full flex flex-col items-center">
+                    <span className="font-semibold text-base mb-2">Find øvelse</span>
+                    <span className="text-xs text-muted-foreground text-center">
+                      Vælg fra eksisterende øvelser i dit bibliotek
+                    </span>
+                  </div>
                 </Button>
               </div>
             )}
@@ -484,38 +728,8 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
               <div className="py-1">
                 <OevelseFormPopup 
                   traeningId={traeningId}
-                  onSuccess={(oevelseId, oevelseNavn) => {
-                    // # Opret en ny træningsøvelse
-                    const nyTraeningOevelse: TraeningOevelse = {
-                      id: -1, // # Midlertidigt ID, vil blive opdateret ved genindlæsning
-                      traeningId,
-                      oevelseId: oevelseId,
-                      position: traeningOevelser.length + 1,
-                      oevelse: {
-                        id: oevelseId,
-                        navn: oevelseNavn,
-                        beskrivelse: null,
-                        billedeSti: null,
-                        brugerPositioner: false,
-                        minimumDeltagere: null,
-                        kategoriNavn: null,
-                      }
-                    };
-                    
-                    // # Tilføj til listen
-                    setTraeningOevelser([...traeningOevelser, nyTraeningOevelse]);
-                    
-                    // # Luk dialogen
-                    setVisOevelsesDialog(false);
-                    setDialogTilstand('menu');
-                    
-                    // # Vis bekræftelse
-                    toast.success(`Øvelse "${oevelseNavn}" oprettet og tilføjet til træningen`);
-                    
-                    // # Genindlæs øvelser for at få korrekte data
-                    hentTraeningOevelser(traeningId).then(oevelser => {
-                      setTraeningOevelser(oevelser as TraeningOevelse[]);
-                    });
+                  onSuccess={async (oevelseId, oevelseNavn) => {
+                    await haandterOpretOevelseSuccess(oevelseId, oevelseNavn);
                   }}
                   onCancel={() => {
                     setDialogTilstand('menu');
@@ -539,35 +753,116 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
                     <Loader2 className="h-6 w-6 animate-spin" />
                   </div>
                 ) : (
-                  <ScrollArea className="h-72">
+                  <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
                     {filteredeOevelser.length === 0 ? (
-                      <p className="text-center text-muted-foreground py-4">
-                        {alleOevelser.length === 0 
-                          ? "Ingen øvelser fundet. Opret en ny øvelse først." 
-                          : "Ingen øvelser matcher søgningen."}
-                      </p>
+                      <p className="text-center text-muted-foreground">Ingen øvelser fundet</p>
                     ) : (
-                      <div className="space-y-2">
-                        {filteredeOevelser.map((oevelse) => (
-                          <Card key={oevelse.id} className="cursor-pointer hover:bg-accent" onClick={() => tilfoejOevelse(oevelse)}>
-                            <CardHeader className="p-3">
-                              <CardTitle className="text-base">{oevelse.navn}</CardTitle>
-                              {oevelse.kategoriNavn && (
-                                <CardDescription className="text-xs">
-                                  Kategori: {oevelse.kategoriNavn}
-                                </CardDescription>
-                              )}
-                            </CardHeader>
-                            {oevelse.beskrivelse && (
-                              <CardContent className="p-3 pt-0">
-                                <p className="text-xs line-clamp-2">{oevelse.beskrivelse}</p>
-                              </CardContent>
+                      filteredeOevelser.map((oevelse) => (
+                        <Button 
+                          key={oevelse.id} 
+                          variant="outline" 
+                          className="w-full justify-start text-left py-3 px-4 h-auto"
+                          onClick={async () => {
+                            try {
+                              // # Tilføj øvelsen
+                              const traeningOevelseId = await tilfoejOevelse(oevelse);
+                              
+                              // # Hvis "Alle deltager" var valgt og øvelses-ID blev oprettet korrekt
+                              if (valgteTilstedevaerende && traeningOevelseId) {
+                                console.log(`Tilføjer alle tilstedeværende til øvelse (ID: ${traeningOevelseId})`);
+                                await tilfoejAlleTilstedevaerende(traeningOevelseId);
+                              }
+                            } catch (error) {
+                              console.error("Fejl ved tilføjelse af øvelse:", error);
+                              toast.error("Der opstod en fejl ved tilføjelse af øvelsen");
+                            }
+                          }}
+                        >
+                          <div>
+                            <div className="font-medium">{oevelse.navn}</div>
+                            {oevelse.kategoriNavn && (
+                              <div className="text-sm text-muted-foreground">
+                                Kategori: {oevelse.kategoriNavn}
+                              </div>
                             )}
-                          </Card>
-                        ))}
-                      </div>
+                          </div>
+                        </Button>
+                      ))
                     )}
-                  </ScrollArea>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {dialogTilstand === 'vaelg-deltagere' && (
+              <div className="py-4 space-y-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <Input 
+                    placeholder="Søg efter deltager..." 
+                    value={soegeord}
+                    onChange={(e) => setSoegeord(e.target.value)}
+                  />
+                </div>
+                
+                {udfoerendeHandling ? (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-y-auto max-h-60 space-y-2 border rounded-md p-2">
+                      {tilstedevaerende.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-4">Ingen deltagere fundet</p>
+                      ) : (
+                        tilstedevaerende
+                          .filter(d => 
+                            soegeord === '' || 
+                            d.navn.toLowerCase().includes(soegeord.toLowerCase()) ||
+                            (d.nummer?.toString() || '').includes(soegeord)
+                          )
+                          .map((deltager) => (
+                            <div 
+                              key={deltager.spillerId} 
+                              className="flex items-center space-x-2 p-2 hover:bg-slate-50 rounded"
+                            >
+                              <Checkbox 
+                                id={`deltager-${deltager.spillerId}`} 
+                                checked={valgteIndividuelleDeltagere.includes(deltager.spillerId)}
+                                onCheckedChange={(checked) => 
+                                  haandterDeltagerValg(deltager.spillerId, checked === true)
+                                }
+                              />
+                              <Label 
+                                htmlFor={`deltager-${deltager.spillerId}`}
+                                className="flex-1 cursor-pointer flex items-center gap-2"
+                              >
+                                <span className="font-medium">{deltager.navn}</span>
+                                {deltager.nummer && (
+                                  <span className="text-xs bg-slate-100 px-2 py-1 rounded">#{deltager.nummer}</span>
+                                )}
+                                <span className="text-xs text-muted-foreground ml-auto">{deltager.holdNavn}</span>
+                              </Label>
+                            </div>
+                          ))
+                      )}
+                    </div>
+                    
+                    <div className="flex justify-between pt-2">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setDialogTilstand('menu')}
+                      >
+                        Annuller
+                      </Button>
+                      
+                      <Button 
+                        onClick={fortsaetTilOevelsesvalg}
+                        disabled={valgteIndividuelleDeltagere.length === 0}
+                      >
+                        Fortsæt ({valgteIndividuelleDeltagere.length} valgt)
+                      </Button>
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -626,40 +921,47 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
                         </CardDescription>
                       )}
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" disabled={udfoerendeHandling}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuLabel>Handlinger</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={() => flytOevelseOp(index)}
-                          disabled={index === 0 || udfoerendeHandling}
-                        >
-                          <ChevronUp className="mr-2 h-4 w-4" />
-                          Flyt op
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={() => flytOevelseNed(index)}
-                          disabled={index === traeningOevelser.length - 1 || udfoerendeHandling}
-                        >
-                          <ChevronDown className="mr-2 h-4 w-4" />
-                          Flyt ned
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={() => fjernOevelse(traeningOevelse.id)}
-                          className="text-destructive"
-                          disabled={udfoerendeHandling}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Fjern øvelse
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <div className="flex items-center gap-2">
+                      <OevelseDeltagereForm 
+                        traeningId={traeningId}
+                        traeningOevelseId={traeningOevelse.id}
+                        tilstedevaerende={tilstedevaerende}
+                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" disabled={udfoerendeHandling}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Handlinger</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            onClick={() => flytOevelseOp(index)}
+                            disabled={index === 0 || udfoerendeHandling}
+                          >
+                            <ChevronUp className="mr-2 h-4 w-4" />
+                            Flyt op
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => flytOevelseNed(index)}
+                            disabled={index === traeningOevelser.length - 1 || udfoerendeHandling}
+                          >
+                            <ChevronDown className="mr-2 h-4 w-4" />
+                            Flyt ned
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            onClick={() => fjernOevelse(traeningOevelse.id)}
+                            className="text-destructive"
+                            disabled={udfoerendeHandling}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Fjern øvelse
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>

@@ -5,6 +5,9 @@ import Database from "better-sqlite3";
 import * as schema from "./schema";
 import { join } from "path";
 import { homedir } from "os";
+import { createClient } from "@libsql/client";
+import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
+import * as fs from "fs";
 
 // # Opret databasemappen i brugerens hjemmemappe, hvis den ikke eksisterer
 const dbPath = join(process.cwd(), "coach-platform.db");
@@ -49,4 +52,25 @@ export const db = getDb();
 
 // # Eksporter databaseskemaet for nem adgang
 export * from "./schema";
-export * from "./actions"; 
+export * from "./actions";
+
+// # Eksporter alle database tabeller
+export const { 
+  hold, 
+  spillere, 
+  offensivePositioner, 
+  defensivePositioner, 
+  traeninger, 
+  traeningHold,
+  traeningDeltager,
+  oevelser,
+  oevelsePositioner,
+  oevelseVariationer,
+  fokuspunkter,
+  oevelseFokuspunkter,
+  kategorier,
+  traeningOevelser,
+  traeningOevelseDetaljer,
+  traeningOevelseFokuspunkter,
+  traeningOevelseDeltagere
+} = schema; 

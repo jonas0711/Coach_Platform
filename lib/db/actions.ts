@@ -1,6 +1,6 @@
 "use server";
 
-import { db, hold, spillere, offensivePositioner, defensivePositioner, traeninger, traeningHold, traeningDeltager, oevelser, oevelsePositioner, kategorier, fokuspunkter, oevelseFokuspunkter, oevelseVariationer } from "./index";
+import { db, hold, spillere, offensivePositioner, defensivePositioner, traeninger, traeningHold, traeningDeltager, oevelser, oevelsePositioner, kategorier, fokuspunkter, oevelseFokuspunkter, oevelseVariationer, traeningOevelseDeltagere, traeningOevelser, traeningOevelseDetaljer, traeningOevelseFokuspunkter } from "./index";
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -748,28 +748,58 @@ export async function tilmeldHoldTilTraening(traeningId: number, holdIds: number
 // # Registrer tilstedeværelse for spillere ved en træning
 export async function registrerTilstedevarelse(traeningId: number, tilstedevaelse: Array<{spillerId: number, tilstede: boolean}>) {
   try {
-    // # Først fjern alle eksisterende tilstedeværelsesregistreringer
-    console.log(`Fjerner eksisterende tilstedeværelse for træning ID: ${traeningId}`);
-    await db.delete(traeningDeltager).where(eq(traeningDeltager.traeningId, traeningId));
+    console.log(`Registrerer tilstedeværelse for træning ID: ${traeningId} med ${tilstedevaelse.length} spillere`);
     
-    // # Derefter tilføj de nye registreringer
-    console.log(`Registrerer tilstedeværelse for ${tilstedevaelse.length} spillere ved træning ID: ${traeningId}`);
+    // # Opret en transaktion for at sikre, at alle operationer enten gennemføres eller rulles tilbage
+    await db.transaction(async (tx) => {
+      // # For hver spiller i listen
+      for (const { spillerId, tilstede } of tilstedevaelse) {
+        // # Tjek om der allerede findes en registrering for denne spiller i denne træning
+        const eksisterende = await tx
+          .select()
+          .from(traeningDeltager)
+          .where(
+            and(
+              eq(traeningDeltager.traeningId, traeningId),
+              eq(traeningDeltager.spillerId, spillerId)
+            )
+          );
+        
+        if (eksisterende.length > 0) {
+          // # Opdater eksisterende registrering
+          await tx
+            .update(traeningDeltager)
+            .set({
+              tilstede,
+              registreretDato: new Date(),
+            })
+            .where(
+              and(
+                eq(traeningDeltager.traeningId, traeningId),
+                eq(traeningDeltager.spillerId, spillerId)
+              )
+            );
+        } else {
+          // # Opret ny registrering
+          await tx
+            .insert(traeningDeltager)
+            .values({
+              traeningId,
+              spillerId,
+              tilstede,
+            });
+        }
+      }
+    });
     
-    for (const { spillerId, tilstede } of tilstedevaelse) {
-      await db.insert(traeningDeltager).values({
-        traeningId,
-        spillerId,
-        tilstede,
-      });
-    }
+    console.log(`Tilstedeværelse registreret for træning ID: ${traeningId}`);
     
     // # Revalidér stien så siden opdateres
     revalidatePath(`/traening/faelles/${traeningId}`);
     
-    return true;
+    return { success: true };
   } catch (error) {
-    // # Log fejl og videregiv den til kalderen
-    console.error(`Fejl ved registrering af tilstedeværelse for træning ID ${traeningId}:`, error);
+    console.error("Fejl ved registrering af tilstedeværelse:", error);
     throw new Error(`Kunne ikke registrere tilstedeværelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
 }
@@ -1663,5 +1693,195 @@ export async function opretKategori(navn: string) {
   } catch (error) {
     console.error(`Fejl ved oprettelse af kategori '${navn}':`, error);
     throw new Error(`Kunne ikke oprette kategori: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Tilføj deltagere til en øvelse i en træning
+export async function tilfoejDeltagereOevelse(traeningOevelseId: number, spillerIds: number[]) {
+  try {
+    console.log(`Tilføjer ${spillerIds.length} deltagere til træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Opret en transaktion for at sikre, at alle operationer enten gennemføres eller rulles tilbage
+    await db.transaction(async (tx) => {
+      // # For hver spiller i listen
+      for (const spillerId of spillerIds) {
+        // # Indsæt relation i databasen
+        await tx
+          .insert(traeningOevelseDeltagere)
+          .values({
+            traeningOevelseId,
+            spillerId,
+          })
+          .onConflictDoNothing(); // # Ignorer hvis relationen allerede eksisterer
+      }
+    });
+    
+    console.log(`Deltagere tilføjet til træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Hent træningsID for at kunne revalidere stien
+    const trainingExercise = await db
+      .select({
+        traeningId: traeningOevelser.traeningId,
+      })
+      .from(traeningOevelser)
+      .where(eq(traeningOevelser.id, traeningOevelseId))
+      .limit(1);
+    
+    if (trainingExercise.length > 0) {
+      // # Revalidér stien så siden opdateres
+      revalidatePath(`/traening/faelles/${trainingExercise[0].traeningId}`);
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Fejl ved tilføjelse af deltagere til øvelse:", error);
+    throw new Error(`Kunne ikke tilføje deltagere til øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Fjern deltagere fra en øvelse i en træning
+export async function fjernDeltagereOevelse(traeningOevelseId: number, spillerIds: number[]) {
+  try {
+    console.log(`Fjerner ${spillerIds.length} deltagere fra træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Opret en transaktion for at sikre, at alle operationer enten gennemføres eller rulles tilbage
+    await db.transaction(async (tx) => {
+      // # For hver spiller i listen
+      for (const spillerId of spillerIds) {
+        // # Slet relation fra databasen
+        await tx
+          .delete(traeningOevelseDeltagere)
+          .where(
+            and(
+              eq(traeningOevelseDeltagere.traeningOevelseId, traeningOevelseId),
+              eq(traeningOevelseDeltagere.spillerId, spillerId)
+            )
+          );
+      }
+    });
+    
+    console.log(`Deltagere fjernet fra træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Hent træningsID for at kunne revalidere stien
+    const trainingExercise = await db
+      .select({
+        traeningId: traeningOevelser.traeningId,
+      })
+      .from(traeningOevelser)
+      .where(eq(traeningOevelser.id, traeningOevelseId))
+      .limit(1);
+    
+    if (trainingExercise.length > 0) {
+      // # Revalidér stien så siden opdateres
+      revalidatePath(`/traening/faelles/${trainingExercise[0].traeningId}`);
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Fejl ved fjernelse af deltagere fra øvelse:", error);
+    throw new Error(`Kunne ikke fjerne deltagere fra øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Hent deltagere for en øvelse i en træning
+export async function hentOevelseDeltagere(traeningOevelseId: number) {
+  try {
+    console.log(`Henter deltagere for træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Hent alle deltagere for øvelsen med deres detaljer
+    const deltagere = await db
+      .select({
+        spillerId: traeningOevelseDeltagere.spillerId,
+        navn: spillere.navn,
+        nummer: spillere.nummer,
+        erMV: spillere.erMV,
+        holdId: spillere.holdId,
+        holdNavn: hold.navn,
+      })
+      .from(traeningOevelseDeltagere)
+      .innerJoin(spillere, eq(traeningOevelseDeltagere.spillerId, spillere.id))
+      .innerJoin(hold, eq(spillere.holdId, hold.id))
+      .where(eq(traeningOevelseDeltagere.traeningOevelseId, traeningOevelseId))
+      .orderBy(spillere.navn);
+    
+    console.log(`Fandt ${deltagere.length} deltagere for træningsøvelse ID: ${traeningOevelseId}`);
+    
+    return deltagere;
+  } catch (error) {
+    console.error("Fejl ved hentning af deltagere for øvelse:", error);
+    throw new Error(`Kunne ikke hente deltagere for øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Tilføj alle tilstedeværende deltagere til en øvelse i en træning
+export async function tilfoejAlleTilstedevaerende(traeningOevelseId: number, traeningId: number) {
+  try {
+    console.log(`Tilføjer alle tilstedeværende deltagere til træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Hent alle tilstedeværende spillere for træningen
+    const tilstedevaerende = await db
+      .select({
+        spillerId: traeningDeltager.spillerId,
+      })
+      .from(traeningDeltager)
+      .where(
+        and(
+          eq(traeningDeltager.traeningId, traeningId),
+          eq(traeningDeltager.tilstede, true)
+        )
+      );
+    
+    // # Hvis der ikke er nogen tilstedeværende, returner tidligt
+    if (tilstedevaerende.length === 0) {
+      console.log(`Ingen tilstedeværende deltagere fundet for træning ID: ${traeningId}`);
+      return { success: true, count: 0 };
+    }
+    
+    // # Tilføj alle tilstedeværende til øvelsen
+    await tilfoejDeltagereOevelse(
+      traeningOevelseId, 
+      tilstedevaerende.map(t => t.spillerId)
+    );
+    
+    console.log(`Tilføjet ${tilstedevaerende.length} tilstedeværende deltagere til træningsøvelse ID: ${traeningOevelseId}`);
+    
+    return { success: true, count: tilstedevaerende.length };
+  } catch (error) {
+    console.error("Fejl ved tilføjelse af alle tilstedeværende til øvelse:", error);
+    throw new Error(`Kunne ikke tilføje alle tilstedeværende til øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
+}
+
+// # Fjern alle deltagere fra en øvelse i en træning
+export async function fjernAlleDeltagere(traeningOevelseId: number) {
+  try {
+    console.log(`Fjerner alle deltagere fra træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Slet alle relationer fra databasen
+    const result = await db
+      .delete(traeningOevelseDeltagere)
+      .where(eq(traeningOevelseDeltagere.traeningOevelseId, traeningOevelseId))
+      .returning({ spillerId: traeningOevelseDeltagere.spillerId });
+    
+    console.log(`Fjernet ${result.length} deltagere fra træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // # Hent træningsID for at kunne revalidere stien
+    const trainingExercise = await db
+      .select({
+        traeningId: traeningOevelser.traeningId,
+      })
+      .from(traeningOevelser)
+      .where(eq(traeningOevelser.id, traeningOevelseId))
+      .limit(1);
+    
+    if (trainingExercise.length > 0) {
+      // # Revalidér stien så siden opdateres
+      revalidatePath(`/traening/faelles/${trainingExercise[0].traeningId}`);
+    }
+    
+    return { success: true, count: result.length };
+  } catch (error) {
+    console.error("Fejl ved fjernelse af alle deltagere fra øvelse:", error);
+    throw new Error(`Kunne ikke fjerne alle deltagere fra øvelse: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
   }
 }

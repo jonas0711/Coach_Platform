@@ -267,6 +267,28 @@ export const traeningOevelseFokuspunkter = sqliteTable(
   }
 );
 
+// # Tabel for deltagere i en specifik øvelse i en træning
+// # Bruges til at definere hvilke spillere der deltager i en specifik øvelse
+export const traeningOevelseDeltagere = sqliteTable(
+  "traening_oevelse_deltagere",
+  {
+    traeningOevelseId: integer("traening_oevelse_id")
+      .notNull()
+      .references(() => traeningOevelser.id, { onDelete: "cascade" }), // # Reference til træningsøvelse
+    spillerId: integer("spiller_id")
+      .notNull()
+      .references(() => spillere.id, { onDelete: "cascade" }), // # Reference til spiller
+    tilfojetDato: integer("tilfojet_dato", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()), // # Dato for tilføjelse til øvelsen
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.traeningOevelseId, table.spillerId] }), // # Primærnøgle er kombinationen af træningsøvelse-id og spiller-id
+    };
+  }
+);
+
 // # Konstanter for offensive positioner
 export const OFFENSIVE_POSITIONER = ["VF", "VB", "PM", "HB", "HF", "ST"] as const;
 export type OffensivPosition = typeof OFFENSIVE_POSITIONER[number];

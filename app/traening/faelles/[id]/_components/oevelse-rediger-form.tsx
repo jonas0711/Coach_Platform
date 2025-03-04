@@ -126,8 +126,8 @@ export function OevelseRedigerForm({
       await opdaterLokalTraeningOevelse({
         id: traeningOevelse.id,
         navn: values.navn,
-        beskrivelse: values.beskrivelse,
-        kategoriNavn: endeligKategori,
+        beskrivelse: values.beskrivelse || null,
+        kategoriNavn: endeligKategori || null,
         fokuspunkter: valgteFokuspunkter,
       });
       

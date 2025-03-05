@@ -48,6 +48,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { OevelseFormPopup } from './_components/oevelse-form-popup';
 import { OevelseRedigerForm } from './_components/oevelse-rediger-form';
 import { OevelseDeltagereForm } from './_components/oevelse-deltagere-form';
+import { OevelsePositionerForm } from './_components/oevelse-positioner-form';
 import { DeltagerValgModal } from './_components/deltager-valg-modal';
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -68,6 +69,13 @@ interface Oevelse {
   minimumDeltagere?: number | null;
 }
 
+// # Type til variation af øvelse
+interface Variation {
+  id: number;
+  navn: string;
+  beskrivelse?: string | null;
+}
+
 // # Type til en træningsøvelse med position
 interface TraeningOevelse {
   id: number;
@@ -82,6 +90,7 @@ interface TraeningOevelse {
     brugerPositioner: boolean;
     minimumDeltagere: number | null;
     kategoriNavn: string | null;
+    variationer?: Variation[];
   };
 }
 
@@ -927,6 +936,15 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
                         traeningOevelseId={traeningOevelse.id}
                         tilstedevaerende={tilstedevaerende}
                       />
+                      {traeningOevelse.oevelse.brugerPositioner && (
+                        <OevelsePositionerForm
+                          traeningId={traeningId}
+                          traeningOevelseId={traeningOevelse.id}
+                          oevelseId={traeningOevelse.oevelse.id}
+                          tilstedevaerende={tilstedevaerende}
+                          variationer={traeningOevelse.oevelse.variationer}
+                        />
+                      )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" disabled={udfoerendeHandling}>

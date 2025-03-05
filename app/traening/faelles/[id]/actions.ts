@@ -16,7 +16,7 @@ import {
 } from "@/lib/db";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { opretFokuspunkt, opretKategori, hentOevelseFokuspunkter, tilfoejDeltagereOevelse, fjernDeltagereOevelse, hentOevelseDeltagere, tilfoejAlleTilstedevaerende, fjernAlleDeltagere } from "@/lib/db/actions";
+import { opretFokuspunkt, opretKategori, hentOevelseFokuspunkter, tilfoejDeltagereOevelse, fjernDeltagereOevelse, hentOevelseDeltagere, tilfoejAlleTilstedevaerende, fjernAlleDeltagere, tildelPositionTilSpiller, fjernPositionFraSpiller, fjernAllePositionerFraOevelse, hentOevelseSpillerPositioner, hentOevelsePositionskrav, hentForeslaaedeSpillereV2 } from "@/lib/db/actions";
 
 // # Interface for at tilføje en øvelse til en træning
 export interface TraeningOevelseData {
@@ -500,6 +500,16 @@ export async function hentTraeningOevelseFokuspunkter(traeningOevelseId: number)
 
 // # Eksporter funktioner til at håndtere deltagere i øvelser
 export { tilfoejDeltagereOevelse, fjernDeltagereOevelse, hentOevelseDeltagere, tilfoejAlleTilstedevaerende, fjernAlleDeltagere };
+
+// # Eksporter funktioner til at håndtere positioner for spillere i øvelser
+export { 
+  tildelPositionTilSpiller, 
+  fjernPositionFraSpiller, 
+  fjernAllePositionerFraOevelse, 
+  hentOevelseSpillerPositioner, 
+  hentOevelsePositionskrav, 
+  hentForeslaaedeSpillereV2
+};
 
 // # Interface for at opdatere deltagere i en øvelse
 export interface OevelseDeltagereData {

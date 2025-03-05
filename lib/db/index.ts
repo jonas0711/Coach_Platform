@@ -72,5 +72,6 @@ export const {
   traeningOevelser,
   traeningOevelseDetaljer,
   traeningOevelseFokuspunkter,
-  traeningOevelseDeltagere
+  traeningOevelseDeltagere,
+  traeningOevelseSpillerPositioner
 } = schema; 

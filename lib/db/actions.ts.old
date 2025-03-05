@@ -2227,31 +2227,30 @@ export async function hentForeslaaedeSpillere(deltagere: any[], traeningOevelseI
  * @param variationId - ID for variationen (valgfri)
  * @returns Liste af foreslåede spillere med deres positioner
  */
-export async function hentForeslaaedeSpillereV2(
-  deltagere: { spillerId: number }[],
+export async function hentForeslaaedeSpillere(
+  deltagere: any[], 
   trainingExerciseId: number,
   variationId?: number
 ) {
+  console.log(`Henter foreslåede spillere for træningsøvelse ID: ${trainingExerciseId}`);
+  
   try {
-    console.log(`Henter foreslåede spillere for træningsøvelse ID: ${trainingExerciseId}`);
-    
-    // # Hvis der ikke er nogen deltagere, returner en tom liste
+    // # Hvis der ikke er nogen deltagere, returner tom array
     if (!deltagere || deltagere.length === 0) {
       console.log(`Ingen deltagere fundet for træningsøvelse ID: ${trainingExerciseId}`);
       return [];
     }
     
     // # Hent spillerpositioner som allerede er tildelt i øvelsen
-    const spillerPositioner = await db.select({
-      spillerId: traeningOevelseSpillerPositioner.spillerId
-    })
-    .from(traeningOevelseSpillerPositioner)
-    .where(
-      and(
-        eq(traeningOevelseSpillerPositioner.traeningOevelseId, trainingExerciseId),
-        variationId ? eq(traeningOevelseSpillerPositioner.variationId, variationId) : isNull(traeningOevelseSpillerPositioner.variationId)
-      )
-    );
+    const spillerPositioner = await prisma.traeningOevelseSpillerPositioner.findMany({
+      where: {
+        traeningOevelseId: trainingExerciseId,
+        variationId: variationId ?? 0 // Brug kun standardvariationen hvis ingen er angivet
+      },
+      select: {
+        spillerId: true
+      }
+    });
     
     console.log(`Fandt ${spillerPositioner.length} spillerpositioner for træningsøvelse ID: ${trainingExerciseId}`);
     
@@ -2261,112 +2260,90 @@ export async function hentForeslaaedeSpillereV2(
     );
     
     // # Opret array til at gemme resultater
-    const positionsforslag: Array<{
-      spillerId: number;
-      navn: string;
-      position: string;
-      erOffensiv: boolean;
-      erPrimaer: boolean;
-      nummer?: number;
-    }> = [];
+    const positionsforslag: any[] = [];
     
     // # Hent foretrukne positioner for hver spiller
-    for (const deltager of spillereUdenPositioner) {
+    await Promise.all(spillereUdenPositioner.map(async (deltager) => {
       const spiller = await hentSpiller(deltager.spillerId);
       
-      // # Hvis spilleren ikke findes, spring over
-      if (!spiller) continue;
-      
       // # Hvis det er en målmand, foreslår vi ikke positioner
-      if (spiller.erMV) {
-        continue;
+      if (spiller.erMaalmand) {
+        return;
       }
       
-      // # Hent offensive primære positioner
-      const primOffPositioner = await db.select()
-        .from(offensivePositioner)
-        .where(
-          and(
-            eq(offensivePositioner.spillerId, spiller.id),
-            eq(offensivePositioner.erPrimaer, true)
-          )
-        );
+      // # Hent offensive positioner
+      const offensivePositioner = await prisma.spillerPrimaerOffensivPosition.findMany({
+        where: {
+          spillerId: spiller.id
+        }
+      });
       
       // # Offensive primære positioner
-      for (const pos of primOffPositioner) {
+      offensivePositioner.forEach(pos => {
         positionsforslag.push({
           spillerId: spiller.id,
-          navn: spiller.navn + (spiller.nummer ? ` #${spiller.nummer}` : ''),
+          navn: spiller.fornavn + (spiller.efternavn ? ` ${spiller.efternavn[0]}` : ''),
           position: pos.position,
           erOffensiv: true,
           erPrimaer: true,
-          nummer: spiller.nummer || undefined
+          nummer: spiller.nummer
         });
-      }
+      });
       
       // # Defensive primære positioner
-      const primDefPositioner = await db.select()
-        .from(defensivePositioner)
-        .where(
-          and(
-            eq(defensivePositioner.spillerId, spiller.id),
-            eq(defensivePositioner.erPrimaer, true)
-          )
-        );
+      const defensivePositioner = await prisma.spillerPrimaerDefensivPosition.findMany({
+        where: {
+          spillerId: spiller.id
+        }
+      });
       
-      for (const pos of primDefPositioner) {
+      defensivePositioner.forEach(pos => {
         positionsforslag.push({
           spillerId: spiller.id,
-          navn: spiller.navn + (spiller.nummer ? ` #${spiller.nummer}` : ''),
+          navn: spiller.fornavn + (spiller.efternavn ? ` ${spiller.efternavn[0]}` : ''),
           position: pos.position,
           erOffensiv: false,
           erPrimaer: true,
-          nummer: spiller.nummer || undefined
+          nummer: spiller.nummer
         });
-      }
+      });
       
-      // # Sekundære offensive positioner
-      const sekOffPositioner = await db.select()
-        .from(offensivePositioner)
-        .where(
-          and(
-            eq(offensivePositioner.spillerId, spiller.id),
-            eq(offensivePositioner.erPrimaer, false)
-          )
-        );
+      // # Sekundære offensive positioner (hvis dem har vi data for)
+      const sekundaereOffensivePositioner = await prisma.spillerSekundaerOffensivPosition.findMany({
+        where: {
+          spillerId: spiller.id
+        }
+      });
       
-      for (const pos of sekOffPositioner) {
+      sekundaereOffensivePositioner.forEach(pos => {
         positionsforslag.push({
           spillerId: spiller.id,
-          navn: spiller.navn + (spiller.nummer ? ` #${spiller.nummer}` : ''),
+          navn: spiller.fornavn + (spiller.efternavn ? ` ${spiller.efternavn[0]}` : ''),
           position: pos.position,
           erOffensiv: true,
           erPrimaer: false,
-          nummer: spiller.nummer || undefined
+          nummer: spiller.nummer
         });
-      }
+      });
       
-      // # Sekundære defensive positioner
-      const sekDefPositioner = await db.select()
-        .from(defensivePositioner)
-        .where(
-          and(
-            eq(defensivePositioner.spillerId, spiller.id),
-            eq(defensivePositioner.erPrimaer, false)
-          )
-        );
+      // # Sekundære defensive positioner (hvis dem har vi data for)
+      const sekundaereDefensivePositioner = await prisma.spillerSekundaerDefensivPosition.findMany({
+        where: {
+          spillerId: spiller.id
+        }
+      });
       
-      for (const pos of sekDefPositioner) {
+      sekundaereDefensivePositioner.forEach(pos => {
         positionsforslag.push({
           spillerId: spiller.id,
-          navn: spiller.navn + (spiller.nummer ? ` #${spiller.nummer}` : ''),
+          navn: spiller.fornavn + (spiller.efternavn ? ` ${spiller.efternavn[0]}` : ''),
           position: pos.position,
           erOffensiv: false,
           erPrimaer: false,
-          nummer: spiller.nummer || undefined
+          nummer: spiller.nummer
         });
-      }
-    }
+      });
+    }));
     
     // # Sorter resultaterne: primær først, derefter efter navn
     positionsforslag.sort((a, b) => {

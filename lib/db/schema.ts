@@ -267,8 +267,8 @@ export const traeningOevelseFokuspunkter = sqliteTable(
   }
 );
 
-// # Tabel for deltagere i en specifik øvelse i en træning
-// # Bruges til at definere hvilke spillere der deltager i en specifik øvelse
+// # Tabel for træningsøvelsedeltagere
+// # Holder styr på hvilke spillere, der deltager i en specifik øvelse i en træning
 export const traeningOevelseDeltagere = sqliteTable(
   "traening_oevelse_deltagere",
   {
@@ -280,11 +280,37 @@ export const traeningOevelseDeltagere = sqliteTable(
       .references(() => spillere.id, { onDelete: "cascade" }), // # Reference til spiller
     tilfojetDato: integer("tilfojet_dato", { mode: "timestamp" })
       .notNull()
-      .$defaultFn(() => new Date()), // # Dato for tilføjelse til øvelsen
+      .$defaultFn(() => new Date()), // # Automatisk tidsstempel for hvornår deltageren blev tilføjet
   },
   (table) => {
     return {
       pk: primaryKey({ columns: [table.traeningOevelseId, table.spillerId] }), // # Primærnøgle er kombinationen af træningsøvelse-id og spiller-id
+    };
+  }
+);
+
+// # Tabel for tildeling af positioner til spillere i en træningsøvelse
+// # Holder styr på hvilken position en spiller har i en specifik øvelse i en træning
+export const traeningOevelseSpillerPositioner = sqliteTable(
+  "traening_oevelse_spiller_positioner",
+  {
+    traeningOevelseId: integer("traening_oevelse_id")
+      .notNull()
+      .references(() => traeningOevelser.id, { onDelete: "cascade" }), // # Reference til træningsøvelse
+    spillerId: integer("spiller_id")
+      .notNull()
+      .references(() => spillere.id, { onDelete: "cascade" }), // # Reference til spiller
+    position: text("position").notNull(), // # Positionens navn
+    erOffensiv: integer("er_offensiv", { mode: "boolean" }).notNull().default(true), // # Om det er en offensiv position
+    variationId: integer("variation_id")
+      .references(() => oevelseVariationer.id, { onDelete: "cascade" }), // # Reference til variation (optional)
+    tilfojetDato: integer("tilfojet_dato", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()), // # Automatisk tidsstempel for hvornår positionen blev tildelt
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.traeningOevelseId, table.spillerId, table.position, table.variationId || ""] }), // # Primærnøgle er kombinationen af træningsøvelse-id, spiller-id, position og variation-id
     };
   }
 );

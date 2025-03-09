@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { 
   Dialog, 
@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Loader2, Users, UserX, Search, Shuffle, 
-  Shield, Swords, Info, AlertCircle, X, Plus
+  Shield, Swords, Info, AlertCircle, X, Plus, ArrowLeftCircle, ArrowRightCircle, Settings, Save
 } from "lucide-react";
 import { toast } from "sonner";
 import { 
@@ -46,6 +46,13 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { type ConnectDragSource, type ConnectDropTarget } from 'react-dnd';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 
 // # Interface for en spiller
 interface Spiller {
@@ -380,8 +387,25 @@ export function OevelsePositionerForm({
   tilstedevaerende,
   variationer = []
 }: OevelsePositionerFormProps) {
+  // # Tilføj detaljeret logging af variationer
+  console.log("=== OEVELSE POSITIONER FORM DEBUGGER ===");
+  console.log(`Træning ID: ${traeningId}, TræningØvelse ID: ${traeningOevelseId}, Øvelse ID: ${oevelseId}`);
+  console.log(`Modtagne variationer (antal: ${variationer?.length || 0}):`, JSON.stringify(variationer, null, 2));
+  
+  // # Tjek om variationerne er tomme eller undefined
+  if (!variationer || variationer.length === 0) {
+    console.log("ADVARSEL: Ingen variationer modtaget!");
+  } else {
+    console.log(`Variation 0 ID: ${variationer[0]?.id}, Navn: ${variationer[0]?.navn}`);
+  }
+  console.log("============================================");
+  
   // # State for dialog
   const [open, setOpen] = useState(false);
+  
+  // # Flag for initialization
+  const dialogOpenRef = useRef(false);
+  const isInitializedRef = useRef(false);
   
   // # State for loading og data
   const [loading, setLoading] = useState(false);
@@ -392,6 +416,12 @@ export function OevelsePositionerForm({
   
   // # State for variationer
   const [aktivVariation, setAktivVariation] = useState<number | null>(null);
+  const [apiVariationer, setApiVariationer] = useState<Variation[]>([]);
+  
+  // # Beregn de faktiske variationer der skal bruges (enten fra props eller API)
+  const faktiskeVariationer = useMemo(() => {
+    return variationer?.length > 0 ? variationer : apiVariationer;
+  }, [variationer, apiVariationer]);
   
   // # State for venteliste og gemning
   const [gemmer, setGemmer] = useState(false);
@@ -399,134 +429,321 @@ export function OevelsePositionerForm({
   const [harUgemteAendringer, setHarUgemteAendringer] = useState(false);
   const [ventendeAendringer, setVentendeAendringer] = useState<PendingChange[]>([]);
 
-  // # Hent data når komponenten indlæses eller dialogen åbnes
-  useEffect(() => {
-    if (open) {
-      hentData();
-    } else {
-      // # Ryd ventende ændringer når dialogen lukkes
-      setVentendeAendringer([]);
-      setHarUgemteAendringer(false);
-    }
-  }, [open, aktivVariation]);
+  // # Hjælpefunktioner til localStorage
+  const getStorageKey = useCallback(() => {
+    return `oevelse_variation_${oevelseId}`;
+  }, [oevelseId]);
 
-  // # Funktion til at hente data
-  const hentData = async () => {
-    // # Sæt loading state
-    setLoading(true);
-    
+  const gemVariationIStorage = useCallback((variationId: number | null) => {
     try {
-      // # Hent positionskrav, spillerpositioner og deltagere parallelt
+      const key = getStorageKey();
+      const value = variationId === null ? "null" : variationId.toString();
+      
+      console.log(`STORAGE: Gemmer variation i localStorage. Nøgle="${key}", værdi="${value}"`);
+      localStorage.setItem(key, value);
+      
+      // Ekstra debug - læs det med det samme for at bekræfte
+      const gemt = localStorage.getItem(key);
+      console.log(`STORAGE: Bekræftet gemt værdi="${gemt}"`);
+    } catch (e) {
+      console.error("STORAGE ERROR: Kunne ikke gemme variation:", e);
+    }
+  }, [getStorageKey]);
+
+  const hentVariationFraStorage = useCallback((): number | null => {
+    try {
+      const key = getStorageKey();
+      const value = localStorage.getItem(key);
+      
+      console.log(`STORAGE: Læser variation fra localStorage. Nøgle="${key}", værdi="${value}"`);
+      
+      if (value === null || value === "undefined" || value === "") {
+        console.log(`STORAGE: Ingen værdi fundet i localStorage`);
+        return null;
+      }
+      
+      if (value === "null") {
+        console.log(`STORAGE: Fandt "null" værdi (Venstre side) i localStorage`);
+        return null;
+      }
+      
+      const numeriskVaerdi = parseInt(value, 10);
+      if (isNaN(numeriskVaerdi)) {
+        console.log(`STORAGE: Ugyldig numerisk værdi "${value}" i localStorage`);
+        return null;
+      }
+      
+      console.log(`STORAGE: Fandt variation=${numeriskVaerdi} i localStorage`);
+      return numeriskVaerdi;
+    } catch (e) {
+      console.error("STORAGE ERROR: Kunne ikke læse variation:", e);
+      return null;
+    }
+  }, [getStorageKey]);
+  
+  // # Simpel funktion til at indlæse data baseret på den valgte variation
+  const indlaesData = async (variation: number | null) => {
+    try {
+      setLoading(true);
+      console.log(`Indlæser data for ${variation ? 'højre side (variation)' : 'venstre side (hovedpositioner)'}`);
+      
       const [positionerKrav, positioner, deltagerliste] = await Promise.all([
-        hentOevelsePositionskrav(oevelseId),
-        hentOevelseSpillerPositioner(traeningOevelseId, aktivVariation || undefined),
+        hentOevelsePositionskrav(oevelseId, variation || undefined),
+        hentOevelseSpillerPositioner(traeningOevelseId, variation || undefined),
         hentOevelseDeltagere(traeningOevelseId)
       ]);
       
-      // # Opdater state med hentet data
+      console.log(`Indlæst ${positionerKrav.length} positionskrav og ${positioner.length} spillerpositioner`);
+      
       setPositionskrav(positionerKrav);
       setSpillerPositioner(positioner);
       setDeltagere(deltagerliste);
       
-      // # Hent foreslåede spillere baseret på deres foretrukne positioner
-      const foreslaaede = await hentForeslaaedeSpillereV2(deltagerliste, traeningOevelseId, aktivVariation || undefined);
+      const foreslaaede = await hentForeslaaedeSpillereV2(
+        deltagerliste, 
+        traeningOevelseId, 
+        variation || undefined
+      );
       setForeslaaedeSpillere(foreslaaede);
       
-      // # Efter data er genindlæst fra database, ryd ventende ændringer
-      // # Dette sikrer at tilstanden er konsistent med databasen
-      if (ventendeAendringer.length > 0) {
-        setVentendeAendringer([]);
-        setHarUgemteAendringer(false);
-      }
     } catch (error) {
-      console.error("Fejl ved hentning af data:", error);
-      toast.error("Der opstod en fejl ved hentning af data");
+      console.error("Fejl ved indlæsning af data:", error);
+      toast.error("Der opstod en fejl ved indlæsning af data");
     } finally {
-      // # Afslut loading state
       setLoading(false);
     }
   };
 
-  // # Funktion til at gemme alle ventende ændringer til databasen
+  // # Funktion til at gemme ændringer
   const gemAendringer = async () => {
     if (ventendeAendringer.length === 0) {
-      toast.info("Ingen ændringer at gemme");
       return;
     }
     
+    setGemmer(true);
+    
     try {
-      setGemmer(true);
+      // # Sorter ændringer efter tidsstempel for at sikre korrekt rækkefølge
+      const sorteredeAendringer = [...ventendeAendringer].sort((a, b) => a.timestamp - b.timestamp);
       
-      // # Sorter ændringer efter tidsstempel (ældste først)
-      const sorteredeAendringer = [...ventendeAendringer]
-        .sort((a, b) => a.timestamp - b.timestamp);
+      // # Del ændringer op i tilføjelser og fjernelser
+      const tilfoejelser = sorteredeAendringer.filter(a => a.type === 'add');
+      const fjernelser = sorteredeAendringer.filter(a => a.type === 'remove');
       
-      // # Opbyg en optimeret liste af ændringer ved at fjerne modstridende eller overflødige ændringer
-      const optimeredeAendringer: Record<string, PendingChange> = {};
-      
-      for (const aendring of sorteredeAendringer) {
-        const noegle = `${aendring.spillerId}-${aendring.position}`;
-        
-        // # Hvis der er en 'add' efterfulgt af en 'remove' for samme spiller/position, annuller begge
-        if (optimeredeAendringer[noegle] && 
-            optimeredeAendringer[noegle].type === 'add' && 
-            aendring.type === 'remove') {
-          delete optimeredeAendringer[noegle];
-        }
-        // # Ellers opdater med den nyeste ændring
-        else {
-          optimeredeAendringer[noegle] = aendring;
-        }
-      }
-      
-      // # Få den endelige liste af ændringer der skal udføres
-      const endeligeAendringer = Object.values(optimeredeAendringer);
-      
-      // # Udfør alle 'remove' operationer først
-      const fjernOperationer = endeligeAendringer.filter(a => a.type === 'remove');
-      for (const op of fjernOperationer) {
+      // # Håndter fjernelser først
+      for (const aendring of fjernelser) {
         await fjernPositionFraSpiller(
-          traeningOevelseId,
-          op.spillerId,
-          op.position,
+          traeningOevelseId, 
+          aendring.spillerId,
+          aendring.position,
           aktivVariation || undefined
         );
       }
       
-      // # Derefter udfør alle 'add' operationer
-      const tilfoejOperationer = endeligeAendringer.filter(a => a.type === 'add');
-      for (const op of tilfoejOperationer) {
-        if (op.erOffensiv !== undefined) {
-          await tildelPositionTilSpiller(
-            traeningOevelseId,
-            op.spillerId,
-            op.position,
-            op.erOffensiv,
-            aktivVariation || undefined
-          );
-        }
+      // # Håndter tilføjelser bagefter
+      for (const aendring of tilfoejelser) {
+        await tildelPositionTilSpiller(
+          traeningOevelseId, 
+          aendring.spillerId, 
+          aendring.position, 
+          aendring.erOffensiv || false,
+          aktivVariation || undefined
+        );
       }
       
-      // # Hent data igen for at sikre konsistens
-      await hentData();
-      
-      // # Ryd ventende ændringer og nulstil ugemte ændringer flag
+      // # Ryd ventende ændringer
       setVentendeAendringer([]);
       setHarUgemteAendringer(false);
       
-      toast.success("Ændringer gemt");
+      // # Genindlæs data
+      await indlaesData(aktivVariation);
+      
+      // # Gem den senest aktiverede variation i localStorage
+      gemVariationIStorage(aktivVariation);
+      
+      toast.success('Ændringer gemt');
     } catch (error) {
       console.error("Fejl ved gemning af ændringer:", error);
-      toast.error("Der opstod en fejl ved gemning af ændringer");
-      
-      // # Ved fejl, hent data igen for at sikre UI er konsistent med databasen
-      await hentData();
+      toast.error('Der opstod en fejl ved gemning');
     } finally {
       setGemmer(false);
     }
   };
+  
+  // # Håndter dialog åbning/lukning
+  useEffect(() => {
+    const handleDialogOpen = async () => {
+      console.log("===== DIALOG ÅBNET =====");
+      
+      if (isInitializedRef.current) {
+        console.log("Dialog allerede initialiseret - genindlæser data...");
+        indlaesData(aktivVariation);
+        return;
+      }
 
-  // # Funktion til at rydde alle ventende ændringer
+      // Marker som under initialisering
+      isInitializedRef.current = true;
+      setLoading(true);
+      
+      try {
+        // 1. Hent variationer hvis nødvendigt
+        if (variationer.length === 0 && apiVariationer.length === 0) {
+          console.log("Henter variationer fra API");
+          try {
+            const response = await fetch(`/api/oevelser/${oevelseId}`);
+            if (response.ok) {
+              const data = await response.json();
+              if (data.variationer?.length) {
+                console.log(`Fandt ${data.variationer.length} variationer fra API`);
+                setApiVariationer(data.variationer);
+              }
+            }
+          } catch (e) {
+            console.error("Kunne ikke hente variationer", e);
+          }
+        }
+        
+        // Definer lokale variationer (vi kan ikke stole på state her)
+        const lokalVariationer = variationer.length > 0 ? variationer : apiVariationer;
+        console.log(`Bruger ${lokalVariationer.length} variationer`);
+        
+        // 2. Prøv at hente gemt variation fra localStorage
+        let gemtVariation = hentVariationFraStorage();
+        
+        // Hvis vi fandt en gemt variation, bekræft at den eksisterer
+        if (gemtVariation !== null) {
+          const variationEksisterer = lokalVariationer.some(v => v.id === gemtVariation);
+          if (!variationEksisterer) {
+            console.log(`ADVARSEL: Den gemte variation ${gemtVariation} findes ikke blandt tilgængelige variationer`);
+            gemtVariation = null;
+          } else {
+            console.log(`SUCCES: Bekræftede at variation ${gemtVariation} eksisterer og kan bruges`);
+          }
+        }
+        
+        // 3. Hvis vi har en gyldig gemt variation, brug den straks
+        if (gemtVariation !== null) {
+          console.log(`BESLUTNING: Bruger gemt variation: ${gemtVariation}`);
+          setAktivVariation(gemtVariation);
+          await indlaesData(gemtVariation);
+          setLoading(false);
+          return;
+        }
+        
+        // 4. Ellers tjek begge sider for positioner
+        console.log("Ingen gyldig gemt variation - tjekker for positioner på begge sider");
+        
+        // Tjek højre side for positioner (variationer)
+        let hoejreSideVariation: number | null = null;
+        
+        for (const variation of lokalVariationer) {
+          if (!variation || !variation.id) continue;
+          
+          console.log(`Tjekker variationer for ${variation.navn} (${variation.id})`);
+          const positioner = await hentOevelseSpillerPositioner(traeningOevelseId, variation.id);
+          
+          if (positioner && positioner.length > 0) {
+            console.log(`Fundet ${positioner.length} positioner på højre side (${variation.navn})`);
+            hoejreSideVariation = variation.id;
+            break;
+          }
+        }
+        
+        // Tjek venstre side for positioner (hovedpositioner)
+        const venstreSidePositioner = await hentOevelseSpillerPositioner(traeningOevelseId, undefined);
+        
+        // Sæt aktiv variation baseret på fund
+        const nyAktivVariation = hoejreSideVariation !== null ? hoejreSideVariation : null;
+        console.log(`BESLUTNING: Vælger ${nyAktivVariation ? 'højre' : 'venstre'} side som aktiv variation.`);
+        setAktivVariation(nyAktivVariation);
+        
+        // 5. Indlæs data
+        await indlaesData(nyAktivVariation);
+        
+        // Gem den valgte variation til næste gang (EFTER data er indlæst)
+        gemVariationIStorage(nyAktivVariation);
+        
+        console.log("===== DIALOG INITIALISERING FULDFØRT =====");
+      } catch (e) {
+        console.error("Fejl under dialog initialisering:", e);
+        // Indlæs venstre side ved fejl
+        setAktivVariation(null);
+        await indlaesData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    // Kun kør initialisering når dialogen åbnes
+    if (open && dialogOpenRef.current !== open) {
+      dialogOpenRef.current = open;
+      handleDialogOpen();
+    } else if (!open && dialogOpenRef.current !== open) {
+      // Nulstil state når dialogen lukkes
+      dialogOpenRef.current = open;
+      isInitializedRef.current = false; // Tillad reinit ved næste åbning
+      setVentendeAendringer([]);
+      setHarUgemteAendringer(false);
+    }
+  }, [open, oevelseId, traeningOevelseId, variationer, aktivVariation, apiVariationer, hentVariationFraStorage, gemVariationIStorage]);
+
+  // # Manuel variation ændring (når brugeren vælger variation)
+  const skiftAktivVariation = async (variationId: string) => {
+    console.log(`Skifter variation til: ${variationId}`);
+    
+    if (harUgemteAendringer) {
+      toast.promise(
+        new Promise<void>(async (resolve, reject) => {
+          try {
+            if (confirm("Du har ugemte ændringer. Vil du gemme dem før du skifter side?")) {
+              await gemAendringer();
+              const newVariation = variationId === "null" ? null : parseInt(variationId);
+              setAktivVariation(newVariation);
+              await indlaesData(newVariation);
+              resolve();
+            } else if (confirm("Vil du fortsætte og miste dine ændringer?")) {
+              const newVariation = variationId === "null" ? null : parseInt(variationId);
+              setAktivVariation(newVariation);
+              setVentendeAendringer([]);
+              setHarUgemteAendringer(false);
+              await indlaesData(newVariation);
+              
+              // Gem den valgte variation
+              gemVariationIStorage(newVariation);
+              
+              resolve();
+            } else {
+              reject(new Error("Skift annulleret"));
+            }
+          } catch (error) {
+            reject(error);
+          }
+        }),
+        {
+          loading: 'Skifter side...',
+          success: variationId === "null" 
+            ? 'Skiftet til venstre side' 
+            : `Skiftet til ${faktiskeVariationer.find(v => v.id.toString() === variationId)?.navn || 'variant'}`,
+          error: 'Skift annulleret'
+        }
+      );
+    } else {
+      const newVariation = variationId === "null" ? null : parseInt(variationId);
+      setAktivVariation(newVariation);
+      await indlaesData(newVariation);
+      
+      // Gem den valgte variation
+      gemVariationIStorage(newVariation);
+      
+      const sidenavn = variationId === "null" 
+        ? "venstre side" 
+        : faktiskeVariationer.find(v => v.id.toString() === variationId)?.navn?.toLowerCase() || 'variant';
+        
+      toast.success(`Skiftet til ${sidenavn}`);
+    }
+  };
+
+  // # Funktion til at annullere ændringer
   const annullerAendringer = () => {
     if (!confirm("Er du sikker på, at du vil annullere alle ændringer?")) {
       return;
@@ -536,7 +753,7 @@ export function OevelsePositionerForm({
     setVentendeAendringer([]);
     setHarUgemteAendringer(false);
     
-    hentData(); // Genindlæs data fra databasen
+    indlaesData(aktivVariation); // Genindlæs data fra databasen
     toast.info("Ændringer annulleret");
   };
 
@@ -650,35 +867,44 @@ export function OevelsePositionerForm({
     setHarUgemteAendringer(true);
   };
 
-  // # Funktion til at fjerne alle positioner - kun lokalt
+  // # Funktion til at fjerne alle positioner
   const fjernAllePositioner = () => {
     if (!confirm("Er du sikker på, at du vil fjerne alle positioner?")) {
       return;
     }
     
-    // # Tilføj ventende ændringer for hver spillerposition
-    const nyeAendringer = spillerPositioner.map(sp => ({
+    // # Fjern først alle eksisterende positioner lokalt
+    const fjernAendringer = spillerPositioner.map(sp => ({
       type: 'remove' as const,
       spillerId: sp.spillerId,
       position: sp.position,
       timestamp: Date.now()
     }));
     
-    if (nyeAendringer.length > 0) {
-      setVentendeAendringer(prev => [...prev, ...nyeAendringer]);
-      setSpillerPositioner([]);
-      setHarUgemteAendringer(true);
-      toast.success("Alle positioner fjernet (ikke gemt)");
-    } else {
-      toast.info("Ingen positioner at fjerne");
-    }
+    setVentendeAendringer(prev => [...prev, ...fjernAendringer]);
+    setSpillerPositioner([]);
+    setHarUgemteAendringer(true);
+    
+    // # Få sidenavn til besked
+    const sideNavn = aktivVariation 
+      ? faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'højre side'
+      : 'venstre side';
+    
+    toast.success(`Alle ${sideNavn} positioner fjernet (ikke gemt)`);
   };
 
-  // # Funktion til at tildele tilfældige positioner - kun lokalt
+  // # Funktion til at tildele tilfældige positioner
   const tildelTilfaeldigePositioner = () => {
-    if (!confirm("Er du sikker på, at du vil tildele tilfældige positioner?")) {
+    // # Kontroller om der er deltagere at tildele
+    if (deltagere.length === 0) {
+      toast.error("Der er ingen deltagere at tildele positioner til");
       return;
     }
+    
+    // # Få sidenavn til besked
+    const sideNavn = aktivVariation 
+      ? faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'højre side'
+      : 'venstre side';
     
     // # Fjern først alle eksisterende positioner lokalt
     const fjernAendringer = spillerPositioner.map(sp => ({
@@ -736,17 +962,7 @@ export function OevelsePositionerForm({
     setVentendeAendringer(prev => [...prev, ...fjernAendringer, ...tilfoejAendringer]);
     setSpillerPositioner(nyePositioner);
     setHarUgemteAendringer(true);
-    toast.success("Tilfældige positioner tildelt (ikke gemt)");
-  };
-
-  // # Funktion til at skifte aktiv variation
-  const skiftAktivVariation = (variationId: string) => {
-    // # Hvis der er ugemte ændringer, vis advarsel
-    if (harUgemteAendringer && !confirm("Du har ugemte ændringer. Vil du fortsætte og miste disse ændringer?")) {
-      return;
-    }
-    
-    setAktivVariation(variationId === "null" ? null : parseInt(variationId));
+    toast.success(`Tilfældige ${sideNavn} positioner tildelt (ikke gemt)`);
   };
 
   // # Filtrer deltagere baseret på søgning
@@ -836,6 +1052,17 @@ export function OevelsePositionerForm({
           <DialogTitle>Tildel positioner til spillere</DialogTitle>
           <DialogDescription>
             Træk spillere fra højre side til de relevante positionsbokse.
+            {variationer && variationer.length > 0 && (
+              <span className="block mt-1 text-sm">
+                {variationer.length === 1 ? (
+                  <>Vælg mellem <strong>venstre side</strong> eller <strong>{variationer[0].navn}</strong> positioner ved at bruge dropdown-menuen under "Side:".</>
+                ) : variationer.some(v => v.navn.toLowerCase().includes('venstre') || v.navn.toLowerCase().includes('højre')) ? (
+                  <>Denne øvelse har positioner for både <strong>venstre side</strong> og <strong>højre side</strong>. Skift mellem dem ved at klikke på "Side:" dropdown-menuen.</>
+                ) : (
+                  <>Denne øvelse har {variationer.length} variationer af positionsopstillinger. Vælg den ønskede variant via "Side:" dropdown-menuen.</>
+                )}
+              </span>
+            )}
           </DialogDescription>
           {harUgemteAendringer && (
             <div className="mt-2 text-amber-600 dark:text-amber-400 font-semibold">
@@ -851,45 +1078,86 @@ export function OevelsePositionerForm({
         ) : (
           <DndProvider backend={HTML5Backend}>
             <div className="space-y-4">
-              {/* Variationsvælger */}
-              {variationer && variationer.length > 0 && (
-                <div>
-                  <Label htmlFor="variation">Variation</Label>
-                  <Select
-                    value={aktivVariation === null ? "null" : aktivVariation.toString()}
-                    onValueChange={skiftAktivVariation}
-                  >
-                    <SelectTrigger id="variation">
-                      <SelectValue placeholder="Vælg variation" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="null">Hovedpositioner</SelectItem>
-                      {variationer.map((variation) => (
-                        <SelectItem key={`variation_${variation.id}`} value={variation.id.toString()}>
-                          {variation.navn}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              
               {/* Status/overblik */}
-              <div className={`p-3 rounded-md ${allePositionerOpfyldt() ? 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'}`}>
-                <div className="flex items-center">
-                  {allePositionerOpfyldt() ? (
-                    <>
-                      <Info className="h-5 w-5 mr-2" />
-                      <span>Alle positioner er udfyldt.</span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="h-5 w-5 mr-2" />
-                      <span>
-                        Der mangler at blive tildelt positioner. Manglende: {positionerMedMangler.map(p => p.position).join(', ')}
-                      </span>
-                    </>
-                  )}
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className={`p-3 rounded-md flex-grow ${allePositionerOpfyldt() ? 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'}`}>
+                  <div className="flex items-center">
+                    {allePositionerOpfyldt() ? (
+                      <>
+                        <Info className="h-5 w-5 mr-2 flex-shrink-0" />
+                        <span>Alle positioner er udfyldt.</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
+                        <span>
+                          Der mangler at blive tildelt positioner. Manglende: {positionerMedMangler.map(p => p.position).join(', ')}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Forbedret side-vælger med dropdown */}
+                <div className="bg-primary/10 p-1 rounded-md border border-primary/20 flex items-center gap-2">
+                  <span className="font-medium pl-2">Side:</span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="flex items-center gap-2 min-w-36 justify-between">
+                        {aktivVariation !== null ? (
+                          <>
+                            <div className="flex items-center gap-2">
+                              {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn.toLowerCase().includes('højre') ? (
+                                <ArrowRightCircle className="h-4 w-4 text-primary" />
+                              ) : (
+                                <ArrowLeftCircle className="h-4 w-4 text-primary" />
+                              )}
+                              <span>{faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'Variant'}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <ArrowLeftCircle className="h-4 w-4 text-primary" />
+                              <span>Venstre Side</span>
+                            </div>
+                          </>
+                        )}
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem 
+                        onClick={() => skiftAktivVariation("null")}
+                        className={`flex gap-2 ${aktivVariation === null ? 'bg-accent' : ''}`}
+                      >
+                        <ArrowLeftCircle className="h-4 w-4" />
+                        <span>Venstre Side</span>
+                      </DropdownMenuItem>
+                      
+                      {faktiskeVariationer && faktiskeVariationer.length > 0 ? (
+                        faktiskeVariationer.map((variation) => (
+                          <DropdownMenuItem 
+                            key={`variation_menu_${variation.id}`}
+                            onClick={() => skiftAktivVariation(variation.id.toString())}
+                            className={`flex gap-2 ${aktivVariation === variation.id ? 'bg-accent' : ''}`}
+                          >
+                            {variation.navn.toLowerCase().includes('højre') ? (
+                              <ArrowRightCircle className="h-4 w-4" />
+                            ) : (
+                              <Settings className="h-4 w-4" />
+                            )}
+                            <span>{variation.navn}</span>
+                          </DropdownMenuItem>
+                        ))
+                      ) : (
+                        <DropdownMenuItem disabled className="text-muted-foreground">
+                          <Info className="h-4 w-4 mr-2" />
+                          <span>Ingen variationer fundet</span>
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               
@@ -946,22 +1214,57 @@ export function OevelsePositionerForm({
                   </div>
                   
                   {/* Knapper til at tildele tilfældige positioner eller fjerne alle */}
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
+                  <div className="flex flex-wrap gap-2 justify-end mt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
                       onClick={tildelTilfaeldigePositioner}
-                      disabled={gemmer || deltagere.length === 0}
+                      disabled={gemmer}
+                      className="flex items-center"
                     >
-                      {gemmer ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Shuffle className="h-4 w-4 mr-2" />}
-                      Tilfældige positioner
+                      <Shuffle className="mr-2 h-4 w-4" />
+                      {aktivVariation !== null ? (
+                        <>
+                          Tilfældige positioner
+                          <Badge variant="secondary" className="ml-2">
+                            {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'variant'}
+                          </Badge>
+                        </>
+                      ) : (
+                        <>
+                          Tilfældige positioner
+                          <Badge variant="secondary" className="ml-2">Venstre Side</Badge>
+                        </>
+                      )}
                     </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
                       onClick={fjernAllePositioner}
-                      disabled={gemmer || spillerPositioner.length === 0}
+                      disabled={gemmer}
+                      className="flex items-center"
                     >
-                      {gemmer ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserX className="h-4 w-4 mr-2" />}
+                      <UserX className="mr-2 h-4 w-4" />
                       Fjern alle
+                      {aktivVariation !== null ? (
+                        <Badge variant="secondary" className="ml-2">
+                          {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'variant'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="ml-2">Venstre Side</Badge>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={ventendeAendringer.length === 0 || gemmer}
+                      onClick={gemAendringer}
+                      className="flex items-center"
+                    >
+                      {gemmer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      Gem ændringer
                     </Button>
                   </div>
                   
@@ -1024,28 +1327,24 @@ export function OevelsePositionerForm({
           </DndProvider>
         )}
         
-        <DialogFooter className="flex justify-between space-x-2">
+        <DialogFooter className="mt-4">
           <div className="flex space-x-2">
+            <Button variant="outline" onClick={lukDialog}>
+              Luk
+            </Button>
             {harUgemteAendringer && (
               <Button 
-                variant="outline" 
-                onClick={annullerAendringer}
-                disabled={gemmer || !harUgemteAendringer}
+                variant="default" 
+                onClick={async () => {
+                  await gemAendringer();
+                  setOpen(false);
+                }}
+                disabled={gemmer || ventendeAendringer.length === 0}
               >
-                Annuller ændringer
+                {gemmer ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Gem og luk
               </Button>
             )}
-          </div>
-          <div className="flex space-x-2">
-            <Button 
-              variant="default" 
-              onClick={gemAendringer}
-              disabled={gemmer || !harUgemteAendringer}
-            >
-              {gemmer ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Gem ændringer
-            </Button>
-            <Button variant="outline" onClick={lukDialog}>Luk</Button>
           </div>
         </DialogFooter>
       </DialogContent>

@@ -1144,7 +1144,7 @@ export async function hentAlleOevelser() {
 
 // # Hent specifik øvelse med ID
 export async function hentOevelse(oevelseId: number) {
-  console.log(`Henter øvelse med ID: ${oevelseId}`);
+  console.log(`DEBUG: Henter øvelse med ID: ${oevelseId}`);
   
   try {
     // # Først henter vi grundlæggende øvelsesinformation
@@ -1156,6 +1156,7 @@ export async function hentOevelse(oevelseId: number) {
     }
 
     const oevelseData = oevelse[0];
+    console.log(`DEBUG: Fandt øvelse: ${oevelseData.navn}`);
 
     // # Henter alle positioner for øvelsen
     const positionerListe = oevelseData.brugerPositioner 
@@ -1163,9 +1164,14 @@ export async function hentOevelse(oevelseId: number) {
           .where(eq(oevelsePositioner.oevelseId, oevelseId))
       : [];
     
+    console.log(`DEBUG: Fandt ${positionerListe.length} positioner for øvelsen`);
+    
     // # Henter variationer og deres positioner
     const variationer = await db.select().from(oevelseVariationer)
       .where(eq(oevelseVariationer.oevelseId, oevelseId));
+    
+    console.log(`DEBUG: Fandt ${variationer.length} variationer for øvelsen`);
+    console.log(`DEBUG: Variationsdata:`, JSON.stringify(variationer, null, 2));
     
     // # For hver variation, hent dens positioner
     const variationerMedPositioner = await Promise.all(
@@ -1176,6 +1182,8 @@ export async function hentOevelse(oevelseId: number) {
             eq(oevelsePositioner.oevelseId, oevelseId),
             eq(oevelsePositioner.variationId, variation.id)
           ));
+        
+        console.log(`DEBUG: Variation "${variation.navn}" har ${variationPositioner.length} positioner`);
         
         return {
           ...variation,
@@ -2106,7 +2114,7 @@ export async function hentOevelseSpillerPositioner(traeningOevelseId: number, va
 // # Hent positionskrav for en øvelse
 export async function hentOevelsePositionskrav(oevelseId: number, variationId?: number) {
   try {
-    console.log(`Henter positionskrav for øvelse ID: ${oevelseId}`);
+    console.log(`DEBUG: Henter positionskrav for øvelse ID: ${oevelseId}, variationId: ${variationId || 'null'}`);
     
     let query = db
       .select({
@@ -2128,7 +2136,8 @@ export async function hentOevelsePositionskrav(oevelseId: number, variationId?: 
     
     const positionskrav = await query;
     
-    console.log(`Fandt ${positionskrav.length} positionskrav for øvelse ID: ${oevelseId}`);
+    console.log(`DEBUG: Fandt ${positionskrav.length} positionskrav for øvelse ID: ${oevelseId} med variationId: ${variationId || 'null'}`);
+    console.log(`DEBUG: Positions data:`, JSON.stringify(positionskrav, null, 2));
     
     return positionskrav;
   } catch (error) {

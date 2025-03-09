@@ -452,7 +452,7 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
   };
   
   // Funktion til at håndtere check/uncheck af en deltager
-  const haandterDeltagerValg = (spillerId: number, checked: boolean) => {
+  const haandterDeltagerVal = (spillerId: number, checked: boolean) => {
     if (checked) {
       // Tilføj til valgte deltagere hvis ikke allerede valgt
       if (!valgteIndividuelleDeltagere.includes(spillerId)) {
@@ -838,7 +838,7 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
                                 id={`deltager-${deltager.spillerId}`} 
                                 checked={valgteIndividuelleDeltagere.includes(deltager.spillerId)}
                                 onCheckedChange={(checked) => 
-                                  haandterDeltagerValg(deltager.spillerId, checked === true)
+                                  haandterDeltagerVal(deltager.spillerId, checked === true)
                                 }
                               />
                               <Label 
@@ -937,13 +937,17 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
                         tilstedevaerende={tilstedevaerende}
                       />
                       {traeningOevelse.oevelse.brugerPositioner && (
-                        <OevelsePositionerForm
-                          traeningId={traeningId}
-                          traeningOevelseId={traeningOevelse.id}
-                          oevelseId={traeningOevelse.oevelse.id}
-                          tilstedevaerende={tilstedevaerende}
-                          variationer={traeningOevelse.oevelse.variationer}
-                        />
+                        <>
+                          {console.log(`DEBUG: Sender variationer til OevelsePositionerForm for øvelse ${traeningOevelse.oevelse.navn}:`, 
+                            JSON.stringify(traeningOevelse.oevelse.variationer || [], null, 2))}
+                          <OevelsePositionerForm
+                            traeningId={traeningId}
+                            traeningOevelseId={traeningOevelse.id}
+                            oevelseId={traeningOevelse.oevelse.id}
+                            tilstedevaerende={tilstedevaerende}
+                            variationer={traeningOevelse.oevelse.variationer}
+                          />
+                        </>
                       )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

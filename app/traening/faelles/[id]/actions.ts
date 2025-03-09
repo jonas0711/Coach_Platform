@@ -556,4 +556,23 @@ export async function hentTraeningDeltagere(traeningId: number): Promise<Deltage
     console.error("Fejl ved hentning af deltagere:", error);
     throw new Error("Kunne ikke hente deltagere");
   }
+}
+
+// # Hent lokale detaljer for en træningsøvelse
+export async function hentLokaleTraeningOevelseDetaljer(traeningOevelseId: number) {
+  try {
+    console.log(`Henter lokale detaljer for træningsøvelse ID: ${traeningOevelseId}`);
+    
+    // Hent lokale detaljer
+    const detaljer = await db
+      .select()
+      .from(traeningOevelseDetaljer)
+      .where(eq(traeningOevelseDetaljer.traeningOevelseId, traeningOevelseId))
+      .limit(1);
+    
+    return detaljer.length > 0 ? detaljer[0] : null;
+  } catch (error) {
+    console.error("Fejl ved hentning af lokale detaljer for træningsøvelse:", error);
+    throw new Error(`Kunne ikke hente lokale detaljer: ${error instanceof Error ? error.message : "Ukendt fejl"}`);
+  }
 } 

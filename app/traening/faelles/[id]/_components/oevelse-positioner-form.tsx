@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Loader2, Users, UserX, Search, Shuffle, 
-  Shield, Swords, Info, AlertCircle, X, Plus, ArrowLeftCircle, ArrowRightCircle, Settings, Save
+  Shield, Swords, Info, AlertCircle, X, Plus, ArrowLeftCircle, ArrowRightCircle, Settings, Save, Copy
 } from "lucide-react";
 import { toast } from "sonner";
 import { 
@@ -53,6 +53,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // # Interface for en spiller
 interface Spiller {
@@ -428,6 +438,12 @@ export function OevelsePositionerForm({
   const [soegeTekst, setSoegeTekst] = useState('');
   const [harUgemteAendringer, setHarUgemteAendringer] = useState(false);
   const [ventendeAendringer, setVentendeAendringer] = useState<PendingChange[]>([]);
+
+  // # State for tekstkopiering-dialog
+  const [kopierDialogOpen, setKopierDialogOpen] = useState(false);
+  const [kopierTekst, setKopierTekst] = useState('');
+  const [oevelsesBeskrivelse, setOevelsesBeskrivelse] = useState<string | null>(null);
+  const [oevelsesFokuspunkter, setOevelsesFokuspunkter] = useState<string[]>([]);
 
   // # Hjælpefunktioner til localStorage
   const getStorageKey = useCallback(() => {
@@ -1033,321 +1049,446 @@ export function OevelsePositionerForm({
     setOpen(false);
   };
 
-  return (
-    <Dialog open={open} onOpenChange={(isOpen) => {
-      // # Hvis der er ugemte ændringer og dialogen lukkes, vis advarsel
-      if (!isOpen && harUgemteAendringer && !confirm("Du har ugemte ændringer. Vil du lukke uden at gemme?")) {
-        return;
+  // # Funktion til at kopiere øvelsesinformation
+  const kopierOevelsesinformation = useCallback(async () => {
+    try {
+      console.log("Forbereder øvelsesinformation til kopiering");
+      
+      // Hent øvelsesdetaljer hvis vi ikke har dem endnu
+      if (!oevelsesBeskrivelse || oevelsesFokuspunkter.length === 0) {
+        const response = await fetch(`/api/oevelser/${oevelseId}`);
+        if (response.ok) {
+          const oevelse = await response.json();
+          setOevelsesBeskrivelse(oevelse.beskrivelse || "Ingen beskrivelse");
+          
+          // Fokuspunkter
+          if (oevelse.fokuspunkter && oevelse.fokuspunkter.length > 0) {
+            const fokuspunkter = oevelse.fokuspunkter.map((fp: any) => fp.tekst);
+            setOevelsesFokuspunkter(fokuspunkter);
+          }
+        }
       }
-      setOpen(isOpen);
-    }}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="ml-2">
-          <Users className="h-4 w-4 mr-2" />
-          Positioner
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[90vw] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Tildel positioner til spillere</DialogTitle>
-          <DialogDescription>
-            Træk spillere fra højre side til de relevante positionsbokse.
-            {variationer && variationer.length > 0 && (
-              <span className="block mt-1 text-sm">
-                {variationer.length === 1 ? (
-                  <>Vælg mellem <strong>venstre side</strong> eller <strong>{variationer[0].navn}</strong> positioner ved at bruge dropdown-menuen under "Side:".</>
-                ) : variationer.some(v => v.navn.toLowerCase().includes('venstre') || v.navn.toLowerCase().includes('højre')) ? (
-                  <>Denne øvelse har positioner for både <strong>venstre side</strong> og <strong>højre side</strong>. Skift mellem dem ved at klikke på "Side:" dropdown-menuen.</>
-                ) : (
-                  <>Denne øvelse har {variationer.length} variationer af positionsopstillinger. Vælg den ønskede variant via "Side:" dropdown-menuen.</>
-                )}
-              </span>
-            )}
-          </DialogDescription>
-          {harUgemteAendringer && (
-            <div className="mt-2 text-amber-600 dark:text-amber-400 font-semibold">
-              Du har ugemte ændringer. Husk at gemme før du lukker dialogen.
-            </div>
-          )}
-        </DialogHeader>
+      
+      // Gruppér spillere efter position (offensiv/defensiv og positionsnavn)
+      const forsvarsspillere: { navn: string; position: string; nummer?: number | null }[] = [];
+      const angrebsspillere: { navn: string; position: string; nummer?: number | null }[] = [];
+      
+      spillerPositioner.forEach(spiller => {
+        const spillerInfo = {
+          navn: spiller.navn,
+          position: spiller.position,
+          nummer: spiller.nummer
+        };
         
-        {loading ? (
-          <div className="flex justify-center items-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <DndProvider backend={HTML5Backend}>
-            <div className="space-y-4">
-              {/* Status/overblik */}
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className={`p-3 rounded-md flex-grow ${allePositionerOpfyldt() ? 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'}`}>
-                  <div className="flex items-center">
-                    {allePositionerOpfyldt() ? (
-                      <>
-                        <Info className="h-5 w-5 mr-2 flex-shrink-0" />
-                        <span>Alle positioner er udfyldt.</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
-                        <span>
-                          Der mangler at blive tildelt positioner. Manglende: {positionerMedMangler.map(p => p.position).join(', ')}
-                        </span>
-                      </>
-                    )}
+        if (spiller.erOffensiv) {
+          angrebsspillere.push(spillerInfo);
+        } else {
+          forsvarsspillere.push(spillerInfo);
+        }
+      });
+      
+      // Formater output tekst
+      let outputTekst = `(Beskrivelse) ${oevelsesBeskrivelse || "Ingen beskrivelse"}\n\n`;
+      
+      // Tilføj fokuspunkter hvis der er nogle
+      if (oevelsesFokuspunkter.length > 0) {
+        outputTekst += "Fokuspunkter:\n";
+        oevelsesFokuspunkter.forEach(punkt => {
+          outputTekst += `- ${punkt}\n`;
+        });
+        outputTekst += "\n";
+      }
+      
+      // Tilføj forsvarsspillere
+      if (forsvarsspillere.length > 0) {
+        outputTekst += "Forsvar: ";
+        outputTekst += forsvarsspillere.map(s => `${s.navn}${s.nummer ? ' (#'+s.nummer+')' : ''} (${s.position})`).join(", ");
+        outputTekst += "\n";
+      }
+      
+      // Tilføj angrebsspillere
+      if (angrebsspillere.length > 0) {
+        outputTekst += "Angreb: ";
+        outputTekst += angrebsspillere.map(s => `${s.navn}${s.nummer ? ' (#'+s.nummer+')' : ''} (${s.position})`).join(", ");
+      }
+      
+      // Gem teksten til dialog og åbn dialogen
+      setKopierTekst(outputTekst);
+      setKopierDialogOpen(true);
+      
+    } catch (error) {
+      console.error("Fejl ved generering af øvelsesinformation:", error);
+      toast.error("Der opstod en fejl ved generering af øvelsesinformation");
+    }
+  }, [oevelseId, spillerPositioner, oevelsesBeskrivelse, oevelsesFokuspunkter]);
+  
+  // # Funktion til at kopiere tekst til udklipsholder
+  const kopierTilUdklipsholder = () => {
+    navigator.clipboard.writeText(kopierTekst)
+      .then(() => {
+        toast.success("Øvelsesinformation kopieret til udklipsholder");
+        setKopierDialogOpen(false);
+      })
+      .catch(err => {
+        console.error("Kunne ikke kopiere tekst: ", err);
+        toast.error("Der opstod en fejl ved kopiering til udklipsholder");
+      });
+  };
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={(isOpen) => {
+        // # Hvis der er ugemte ændringer og dialogen lukkes, vis advarsel
+        if (!isOpen && harUgemteAendringer && !confirm("Du har ugemte ændringer. Vil du lukke uden at gemme?")) {
+          return;
+        }
+        setOpen(isOpen);
+      }}>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className="ml-2">
+            <Users className="h-4 w-4 mr-2" />
+            Positioner
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-[90vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Tildel positioner til spillere</DialogTitle>
+            <DialogDescription>
+              Træk spillere fra højre side til de relevante positionsbokse.
+              {variationer && variationer.length > 0 && (
+                <span className="block mt-1 text-sm">
+                  {variationer.length === 1 ? (
+                    <>Vælg mellem <strong>venstre side</strong> eller <strong>{variationer[0].navn}</strong> positioner ved at bruge dropdown-menuen under "Side:".</>
+                  ) : variationer.some(v => v.navn.toLowerCase().includes('venstre') || v.navn.toLowerCase().includes('højre')) ? (
+                    <>Denne øvelse har positioner for både <strong>venstre side</strong> og <strong>højre side</strong>. Skift mellem dem ved at klikke på "Side:" dropdown-menuen.</>
+                  ) : (
+                    <>Denne øvelse har {variationer.length} variationer af positionsopstillinger. Vælg den ønskede variant via "Side:" dropdown-menuen.</>
+                  )}
+                </span>
+              )}
+            </DialogDescription>
+            {harUgemteAendringer && (
+              <div className="mt-2 text-amber-600 dark:text-amber-400 font-semibold">
+                Du har ugemte ændringer. Husk at gemme før du lukker dialogen.
+              </div>
+            )}
+          </DialogHeader>
+          
+          {loading ? (
+            <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <DndProvider backend={HTML5Backend}>
+              <div className="space-y-4">
+                {/* Status/overblik */}
+                <div className="flex flex-col md:flex-row gap-4">
+                  <div className={`p-3 rounded-md flex-grow ${allePositionerOpfyldt() ? 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'}`}>
+                    <div className="flex items-center">
+                      {allePositionerOpfyldt() ? (
+                        <>
+                          <Info className="h-5 w-5 mr-2 flex-shrink-0" />
+                          <span>Alle positioner er udfyldt.</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
+                          <span>
+                            Der mangler at blive tildelt positioner. Manglende: {positionerMedMangler.map(p => p.position).join(', ')}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Forbedret side-vælger med dropdown */}
+                  <div className="bg-primary/10 p-1 rounded-md border border-primary/20 flex items-center gap-2">
+                    <span className="font-medium pl-2">Side:</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="flex items-center gap-2 min-w-36 justify-between">
+                          {aktivVariation !== null ? (
+                            <>
+                              <div className="flex items-center gap-2">
+                                {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn.toLowerCase().includes('højre') ? (
+                                  <ArrowRightCircle className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <ArrowLeftCircle className="h-4 w-4 text-primary" />
+                                )}
+                                <span>{faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'Variant'}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <ArrowLeftCircle className="h-4 w-4 text-primary" />
+                                <span>Venstre Side</span>
+                              </div>
+                            </>
+                          )}
+                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem 
+                          onClick={() => skiftAktivVariation("null")}
+                          className={`flex gap-2 ${aktivVariation === null ? 'bg-accent' : ''}`}
+                        >
+                          <ArrowLeftCircle className="h-4 w-4" />
+                          <span>Venstre Side</span>
+                        </DropdownMenuItem>
+                        
+                        {faktiskeVariationer && faktiskeVariationer.length > 0 ? (
+                          faktiskeVariationer.map((variation) => (
+                            <DropdownMenuItem 
+                              key={`variation_menu_${variation.id}`}
+                              onClick={() => skiftAktivVariation(variation.id.toString())}
+                              className={`flex gap-2 ${aktivVariation === variation.id ? 'bg-accent' : ''}`}
+                            >
+                              {variation.navn.toLowerCase().includes('højre') ? (
+                                <ArrowRightCircle className="h-4 w-4" />
+                              ) : (
+                                <Settings className="h-4 w-4" />
+                              )}
+                              <span>{variation.navn}</span>
+                            </DropdownMenuItem>
+                          ))
+                        ) : (
+                          <DropdownMenuItem disabled className="text-muted-foreground">
+                            <Info className="h-4 w-4 mr-2" />
+                            <span>Ingen variationer fundet</span>
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
                 
-                {/* Forbedret side-vælger med dropdown */}
-                <div className="bg-primary/10 p-1 rounded-md border border-primary/20 flex items-center gap-2">
-                  <span className="font-medium pl-2">Side:</span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="flex items-center gap-2 min-w-36 justify-between">
+                {/* Positionskrav */}
+                {positionskrav.length > 0 ? (
+                  <div className="space-y-6">
+                    {/* Grid med positioner */}
+                    <div className="space-y-1">
+                      {grupperPositioner.offensive.length > 0 && (
+                        <>
+                          <div className="flex items-center mb-2">
+                            <Swords className="h-5 w-5 mr-2 text-amber-600 dark:text-amber-400" />
+                            <h3 className="text-lg font-semibold">Offensive positioner</h3>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
+                            {grupperPositioner.offensive.map((krav) => (
+                              <PositionBox
+                                key={`position_${krav.position}`}
+                                positionskrav={krav}
+                                spillerPositioner={spillerPositioner}
+                                onTildelPosition={tildelPosition}
+                                onFjernPosition={fjernPosition}
+                                onFlytSpiller={flytSpiller}
+                                gemmer={gemmer}
+                                foreslaaedeSpillere={foreslaaedeSpillere}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      {grupperPositioner.defensive.length > 0 && (
+                        <>
+                          <div className="flex items-center mb-2">
+                            <Shield className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
+                            <h3 className="text-lg font-semibold">Defensive positioner</h3>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            {grupperPositioner.defensive.map((krav) => (
+                              <PositionBox
+                                key={`position_${krav.position}`}
+                                positionskrav={krav}
+                                spillerPositioner={spillerPositioner}
+                                onTildelPosition={tildelPosition}
+                                onFjernPosition={fjernPosition}
+                                onFlytSpiller={flytSpiller}
+                                gemmer={gemmer}
+                                foreslaaedeSpillere={foreslaaedeSpillere}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    
+                    {/* Knapper til at tildele tilfældige positioner eller fjerne alle */}
+                    <div className="flex flex-wrap gap-2 justify-end mt-4">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={tildelTilfaeldigePositioner}
+                        disabled={gemmer}
+                        className="flex items-center"
+                      >
+                        <Shuffle className="mr-2 h-4 w-4" />
                         {aktivVariation !== null ? (
                           <>
-                            <div className="flex items-center gap-2">
-                              {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn.toLowerCase().includes('højre') ? (
-                                <ArrowRightCircle className="h-4 w-4 text-primary" />
-                              ) : (
-                                <ArrowLeftCircle className="h-4 w-4 text-primary" />
-                              )}
-                              <span>{faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'Variant'}</span>
-                            </div>
+                            Tilfældige positioner
+                            <Badge variant="secondary" className="ml-2">
+                              {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'variant'}
+                            </Badge>
                           </>
                         ) : (
                           <>
-                            <div className="flex items-center gap-2">
-                              <ArrowLeftCircle className="h-4 w-4 text-primary" />
-                              <span>Venstre Side</span>
-                            </div>
+                            Tilfældige positioner
+                            <Badge variant="secondary" className="ml-2">Venstre Side</Badge>
                           </>
                         )}
-                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem 
-                        onClick={() => skiftAktivVariation("null")}
-                        className={`flex gap-2 ${aktivVariation === null ? 'bg-accent' : ''}`}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={fjernAllePositioner}
+                        disabled={gemmer}
+                        className="flex items-center"
                       >
-                        <ArrowLeftCircle className="h-4 w-4" />
-                        <span>Venstre Side</span>
-                      </DropdownMenuItem>
-                      
-                      {faktiskeVariationer && faktiskeVariationer.length > 0 ? (
-                        faktiskeVariationer.map((variation) => (
-                          <DropdownMenuItem 
-                            key={`variation_menu_${variation.id}`}
-                            onClick={() => skiftAktivVariation(variation.id.toString())}
-                            className={`flex gap-2 ${aktivVariation === variation.id ? 'bg-accent' : ''}`}
-                          >
-                            {variation.navn.toLowerCase().includes('højre') ? (
-                              <ArrowRightCircle className="h-4 w-4" />
-                            ) : (
-                              <Settings className="h-4 w-4" />
-                            )}
-                            <span>{variation.navn}</span>
-                          </DropdownMenuItem>
-                        ))
-                      ) : (
-                        <DropdownMenuItem disabled className="text-muted-foreground">
-                          <Info className="h-4 w-4 mr-2" />
-                          <span>Ingen variationer fundet</span>
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-              
-              {/* Positionskrav */}
-              {positionskrav.length > 0 ? (
-                <div className="space-y-6">
-                  {/* Grid med positioner */}
-                  <div className="space-y-1">
-                    {grupperPositioner.offensive.length > 0 && (
-                      <>
-                        <div className="flex items-center mb-2">
-                          <Swords className="h-5 w-5 mr-2 text-amber-600 dark:text-amber-400" />
-                          <h3 className="text-lg font-semibold">Offensive positioner</h3>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
-                          {grupperPositioner.offensive.map((krav) => (
-                            <PositionBox
-                              key={`position_${krav.position}`}
-                              positionskrav={krav}
-                              spillerPositioner={spillerPositioner}
-                              onTildelPosition={tildelPosition}
-                              onFjernPosition={fjernPosition}
-                              onFlytSpiller={flytSpiller}
-                              gemmer={gemmer}
-                              foreslaaedeSpillere={foreslaaedeSpillere}
-                            />
-                          ))}
-                        </div>
-                      </>
-                    )}
-
-                    {grupperPositioner.defensive.length > 0 && (
-                      <>
-                        <div className="flex items-center mb-2">
-                          <Shield className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
-                          <h3 className="text-lg font-semibold">Defensive positioner</h3>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                          {grupperPositioner.defensive.map((krav) => (
-                            <PositionBox
-                              key={`position_${krav.position}`}
-                              positionskrav={krav}
-                              spillerPositioner={spillerPositioner}
-                              onTildelPosition={tildelPosition}
-                              onFjernPosition={fjernPosition}
-                              onFlytSpiller={flytSpiller}
-                              gemmer={gemmer}
-                              foreslaaedeSpillere={foreslaaedeSpillere}
-                            />
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  
-                  {/* Knapper til at tildele tilfældige positioner eller fjerne alle */}
-                  <div className="flex flex-wrap gap-2 justify-end mt-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={tildelTilfaeldigePositioner}
-                      disabled={gemmer}
-                      className="flex items-center"
-                    >
-                      <Shuffle className="mr-2 h-4 w-4" />
-                      {aktivVariation !== null ? (
-                        <>
-                          Tilfældige positioner
+                        <UserX className="mr-2 h-4 w-4" />
+                        Fjern alle
+                        {aktivVariation !== null ? (
                           <Badge variant="secondary" className="ml-2">
                             {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'variant'}
                           </Badge>
-                        </>
-                      ) : (
-                        <>
-                          Tilfældige positioner
+                        ) : (
                           <Badge variant="secondary" className="ml-2">Venstre Side</Badge>
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={fjernAllePositioner}
-                      disabled={gemmer}
-                      className="flex items-center"
-                    >
-                      <UserX className="mr-2 h-4 w-4" />
-                      Fjern alle
-                      {aktivVariation !== null ? (
-                        <Badge variant="secondary" className="ml-2">
-                          {faktiskeVariationer.find(v => v.id === aktivVariation)?.navn || 'variant'}
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="ml-2">Venstre Side</Badge>
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={ventendeAendringer.length === 0 || gemmer}
-                      onClick={gemAendringer}
-                      className="flex items-center"
-                    >
-                      {gemmer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      Gem ændringer
-                    </Button>
-                  </div>
-                  
-                  {/* Tilgængelige spillere */}
-                  <div className="bg-muted/30 p-4 rounded-md">
-                    <div className="mb-4">
-                      <div className="flex justify-between items-center">
-                        <Label className="text-lg font-medium">Tilgængelige spillere</Label>
-                        <div className="relative w-full max-w-xs">
-                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            placeholder="Søg efter spiller..."
-                            className="pl-8"
-                            value={soegeTekst}
-                            onChange={(e) => setSoegeTekst(e.target.value)}
-                          />
-                        </div>
-                      </div>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={ventendeAendringer.length === 0 || gemmer}
+                        onClick={gemAendringer}
+                        className="flex items-center"
+                      >
+                        {gemmer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        Gem ændringer
+                      </Button>
                     </div>
                     
-                    <ScrollArea className="h-[250px]">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {Object.entries(grupperDeltagere()).map(([holdNavn, spillere]) => (
-                          <div key={`team_${holdNavn}`} className="space-y-3">
-                            <h4 className="font-medium text-sm">{holdNavn}</h4>
-                            <div className="space-y-2">
-                              {spillere
-                                .filter(spiller => !erSpillerTildeltPosition(spiller.spillerId))
-                                .map((spiller) => (
-                                  <DraggableSpiller
-                                    key={`player_${spiller.spillerId}`}
-                                    spiller={spiller}
-                                    isDraggable={!gemmer}
-                                  />
-                                ))}
-                            </div>
-                            {spillere.filter(spiller => !erSpillerTildeltPosition(spiller.spillerId)).length === 0 && (
-                              <div className="text-sm text-muted-foreground italic">
-                                Alle spillere er tildelt positioner
-                              </div>
-                            )}
+                    {/* Tilgængelige spillere */}
+                    <div className="bg-muted/30 p-4 rounded-md">
+                      <div className="mb-4">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-lg font-medium">Tilgængelige spillere</Label>
+                          <div className="relative w-full max-w-xs">
+                            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              placeholder="Søg efter spiller..."
+                              className="pl-8"
+                              value={soegeTekst}
+                              onChange={(e) => setSoegeTekst(e.target.value)}
+                            />
                           </div>
-                        ))}
+                        </div>
                       </div>
                       
-                      {filtrerDeltagere().length === 0 && (
-                        <div className="flex justify-center items-center h-40 text-muted-foreground">
-                          Ingen spillere matcher søgningen
+                      <ScrollArea className="h-[250px]">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {Object.entries(grupperDeltagere()).map(([holdNavn, spillere]) => (
+                            <div key={`team_${holdNavn}`} className="space-y-3">
+                              <h4 className="font-medium text-sm">{holdNavn}</h4>
+                              <div className="space-y-2">
+                                {spillere
+                                  .filter(spiller => !erSpillerTildeltPosition(spiller.spillerId))
+                                  .map((spiller) => (
+                                    <DraggableSpiller
+                                      key={`player_${spiller.spillerId}`}
+                                      spiller={spiller}
+                                      isDraggable={!gemmer}
+                                    />
+                                  ))}
+                              </div>
+                              {spillere.filter(spiller => !erSpillerTildeltPosition(spiller.spillerId)).length === 0 && (
+                                <div className="text-sm text-muted-foreground italic">
+                                  Alle spillere er tildelt positioner
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      )}
-                    </ScrollArea>
+                        
+                        {filtrerDeltagere().length === 0 && (
+                          <div className="flex justify-center items-center h-40 text-muted-foreground">
+                            Ingen spillere matcher søgningen
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="flex justify-center items-center py-8 text-muted-foreground">
-                  Denne øvelse har ingen definerede positioner
-                </div>
-              )}
-            </div>
-          </DndProvider>
-        )}
-        
-        <DialogFooter className="mt-4">
-          <div className="flex space-x-2">
-            <Button variant="outline" onClick={lukDialog}>
-              Luk
-            </Button>
-            {harUgemteAendringer && (
-              <Button 
-                variant="default" 
-                onClick={async () => {
-                  await gemAendringer();
-                  setOpen(false);
-                }}
-                disabled={gemmer || ventendeAendringer.length === 0}
+                ) : (
+                  <div className="flex justify-center items-center py-8 text-muted-foreground">
+                    Denne øvelse har ingen definerede positioner
+                  </div>
+                )}
+              </div>
+            </DndProvider>
+          )}
+          
+          <DialogFooter className="flex flex-row justify-between items-center mt-4">
+            <div className="flex-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={kopierOevelsesinformation}
+                className="flex items-center"
               >
-                {gemmer ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Gem og luk
+                <Copy className="h-4 w-4 mr-2" />
+                Kopier Øvelsesinformation
               </Button>
-            )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={lukDialog}
+                disabled={gemmer}
+                className="ml-auto"
+              >
+                Annuller
+              </Button>
+              <Button
+                type="button"
+                onClick={gemAendringer}
+                disabled={gemmer || ventendeAendringer.length === 0}
+                className="flex items-center"
+              >
+                {gemmer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Gem ændringer
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Kopierings dialog */}
+      <AlertDialog open={kopierDialogOpen} onOpenChange={setKopierDialogOpen}>
+        <AlertDialogContent className="max-w-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kopier øvelsesinformation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Her er den formaterede øvelsesinformation, klar til at kopieres og indsættes i dit øvelsesprogram.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="my-4 p-4 border rounded-md bg-muted/30 whitespace-pre-wrap max-h-[50vh] overflow-y-auto">
+            {kopierTekst}
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel>Luk</AlertDialogCancel>
+            <AlertDialogAction onClick={kopierTilUdklipsholder} className="flex items-center">
+              <Copy className="h-4 w-4 mr-2" />
+              Kopier til udklipsholder
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 } 

@@ -27,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronUp, ChevronDown, Plus, Edit, Search, Trash2, Loader2, CheckCircle2 } from "lucide-react";
+import { ChevronUp, ChevronDown, Plus, Edit, Search, Trash2, Loader2, CheckCircle2, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { 
@@ -40,7 +40,9 @@ import {
   hentTraeningDeltagere,
   tilfoejAlleTilstedevaerende,
   hentOevelseDeltagere,
-  tilfoejDeltagereOevelse
+  tilfoejDeltagereOevelse,
+  hentOevelseSpillerPositioner,
+  hentLokaleTraeningOevelseDetaljer
 } from "./actions";
 import { hentAlleOevelser, hentAlleKategorier, hentAlleFokuspunkter, hentOevelseFokuspunkter } from "@/lib/db/actions";
 import { Input } from "@/components/ui/input";
@@ -52,6 +54,16 @@ import { OevelsePositionerForm } from './_components/oevelse-positioner-form';
 import { DeltagerValgModal } from './_components/deltager-valg-modal';
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // # Interface til at definere props til komponenten
 interface TraeningModulProps {
@@ -144,6 +156,10 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
   const [valgteTilstedevaerende, setValgteTilstedevaerende] = useState(true);
   // # State til at holde styr på valgte individuelle deltagere
   const [valgteIndividuelleDeltagere, setValgteIndividuelleDeltagere] = useState<number[]>([]);
+  
+  // # State for kopier-dialog
+  const [kopierDialogOpen, setKopierDialogOpen] = useState(false);
+  const [kopierTekst, setKopierTekst] = useState('');
   
   // # Hent data når komponenten indlæses
   useEffect(() => {
@@ -650,6 +666,101 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
     }
   };
   
+  // # Funktion til at kopiere øvelsesinformation
+  const kopierOevelsesinformation = async (traeningOevelseId: number, oevelseId: number) => {
+    try {
+      console.log("Forbereder øvelsesinformation til kopiering");
+      setUdfoerendeHandling(true);
+      
+      // Find den aktuelle træningsøvelse i state for at få lokale ændringer
+      const traeningOevelseInfo = traeningOevelser.find(
+        to => to.id === traeningOevelseId
+      );
+
+      if (!traeningOevelseInfo) {
+        throw new Error('Kunne ikke finde øvelsesdata i træningen');
+      }
+      
+      // Hent lokale detaljer via server action i stedet for direkte database-kald
+      const lokalDetaljer = await hentLokaleTraeningOevelseDetaljer(traeningOevelseId);
+        
+      // Hent lokale fokuspunkter
+      const fokuspunkter = await hentTraeningOevelseFokuspunkter(traeningOevelseId);
+      
+      // Hent positioner/spillere
+      const spillerPositioner = await hentOevelseSpillerPositioner(traeningOevelseId);
+      
+      // Gruppér spillere efter position (offensiv/defensiv)
+      const forsvarsspillere: { navn: string; position: string; nummer?: number | null }[] = [];
+      const angrebsspillere: { navn: string; position: string; nummer?: number | null }[] = [];
+      
+      spillerPositioner.forEach(spiller => {
+        const spillerInfo = {
+          navn: spiller.navn,
+          position: spiller.position,
+          nummer: spiller.nummer
+        };
+        
+        if (spiller.erOffensiv) {
+          angrebsspillere.push(spillerInfo);
+        } else {
+          forsvarsspillere.push(spillerInfo);
+        }
+      });
+      
+      // Formater output tekst - Brug træningsøvelsens beskrivelse (lokale ændringer prioriteres)
+      const beskrivelse = lokalDetaljer?.beskrivelse || traeningOevelseInfo.oevelse.beskrivelse || "Ingen beskrivelse";
+      
+      // Fjern "(Beskrivelse)" fra outputtet og vis kun selve beskrivelsen
+      let outputTekst = `${beskrivelse}\n\n`;
+      
+      // Tilføj fokuspunkter hvis der er nogle
+      if (fokuspunkter.length > 0) {
+        outputTekst += "Fokuspunkter:\n";
+        fokuspunkter.forEach(punkt => {
+          outputTekst += `- ${typeof punkt === 'object' && punkt !== null && 'tekst' in punkt ? punkt.tekst : punkt}\n`;
+        });
+        outputTekst += "\n";
+      }
+      
+      // Tilføj forsvarsspillere
+      if (forsvarsspillere.length > 0) {
+        outputTekst += "Forsvar: ";
+        outputTekst += forsvarsspillere.map(s => `${s.navn}${s.nummer ? ' (#'+s.nummer+')' : ''} (${s.position})`).join(", ");
+        outputTekst += "\n";
+      }
+      
+      // Tilføj angrebsspillere
+      if (angrebsspillere.length > 0) {
+        outputTekst += "Angreb: ";
+        outputTekst += angrebsspillere.map(s => `${s.navn}${s.nummer ? ' (#'+s.nummer+')' : ''} (${s.position})`).join(", ");
+      }
+      
+      // Vis dialogen med den formaterede tekst
+      setKopierTekst(outputTekst);
+      setKopierDialogOpen(true);
+      
+    } catch (error) {
+      console.error("Fejl ved generering af øvelsesinformation:", error);
+      toast.error("Der opstod en fejl ved generering af øvelsesinformation");
+    } finally {
+      setUdfoerendeHandling(false);
+    }
+  };
+  
+  // # Funktion til at kopiere tekst til udklipsholder
+  const kopierTilUdklipsholder = () => {
+    navigator.clipboard.writeText(kopierTekst)
+      .then(() => {
+        toast.success("Øvelsesinformation kopieret til udklipsholder");
+        setKopierDialogOpen(false);
+      })
+      .catch(err => {
+        console.error("Kunne ikke kopiere tekst: ", err);
+        toast.error("Der opstod en fejl ved kopiering til udklipsholder");
+      });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -949,6 +1060,15 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
                           />
                         </>
                       )}
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => kopierOevelsesinformation(traeningOevelse.id, traeningOevelse.oevelse.id)}
+                        disabled={udfoerendeHandling}
+                        title="Kopier øvelsesinformation"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" disabled={udfoerendeHandling}>
@@ -1063,6 +1183,30 @@ export function TraeningModul({ traeningId }: TraeningModulProps) {
           )}
         </div>
       )}
+      
+      {/* Kopierings dialog */}
+      <AlertDialog open={kopierDialogOpen} onOpenChange={setKopierDialogOpen}>
+        <AlertDialogContent className="max-w-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kopier øvelsesinformation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Her er den formaterede øvelsesinformation, klar til at kopieres og indsættes i dit øvelsesprogram.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="my-4 p-4 border rounded-md bg-muted/30 whitespace-pre-wrap max-h-[50vh] overflow-y-auto">
+            {kopierTekst}
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel>Luk</AlertDialogCancel>
+            <AlertDialogAction onClick={kopierTilUdklipsholder} className="flex items-center">
+              <Copy className="h-4 w-4 mr-2" />
+              Kopier til udklipsholder
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 } 
